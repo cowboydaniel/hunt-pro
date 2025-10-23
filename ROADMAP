@@ -3,9 +3,9 @@
 This roadmap is structured as nine progressive phases that build from core stability to advanced field intelligence. Timelines remain flexible so that feedback from deployments can guide prioritization.
 
 ## Phase 1 – Core Stabilization
-- Audit existing modules for critical bugs and create automated smoke tests around `main.py` entry points.
-- Document environment setup, including Python version support and baseline hardware requirements.
-- Establish linting and formatting baselines to ensure consistent contributions.
+- [x] Audit existing modules for critical bugs and create automated smoke tests around `main.py` entry points.
+- [ ] Document environment setup, including Python version support and baseline hardware requirements.
+- [ ] Establish linting and formatting baselines to ensure consistent contributions.
 
 ## Phase 2 – Dependency & Build Infrastructure
 - Publish a complete `requirements.txt` and optional lock file for reproducible environments.

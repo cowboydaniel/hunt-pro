@@ -16,21 +16,17 @@ It handles dependency checking, argument parsing, and application startup.
 
 
 
-import sys
-
-import os
-
 import argparse
-
+import os
+import sys
+import time
 import traceback
-
 from pathlib import Path
-
 from typing import Optional, List
 
 
 
-def parse_arguments() -> argparse.Namespace:
+def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
     """Parse command line arguments."""
 
@@ -144,7 +140,7 @@ Examples:
 
     
 
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 
@@ -641,8 +637,6 @@ def main():
 
 
 if __name__ == "__main__":
-
-    import time
 
     start_time = time.time()
 
