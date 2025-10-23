@@ -11,18 +11,47 @@ Hunt Pro is a PySide6 desktop assistant designed to support hunters with modern 
 - **Virtual inputs** – On-screen keyboard and numpad managers for touch-friendly deployments (`keyboard.py` and `numpad.py`).
 - **Robust logging** – Centralized logging utilities exposed via `logger.py`.
 
-## Requirements
+## Environment Setup
 
-- Python 3.10 or newer
-- PySide6 and PySide6-Charts
+### Supported Platforms
 
-Install the Python dependencies with:
+- **Operating systems:** Windows 10/11, macOS 12+, and modern Linux distributions with X11 or Wayland support.
+- **Python:** 3.10 through 3.12 (64-bit builds recommended).
 
-```bash
-pip install -r requirements.txt
-```
+### Baseline Hardware
 
-> **Note:** A `requirements.txt` file is not bundled yet. Install at least `PySide6` and `PySide6-Addons` packages before running the application.
+- Quad-core CPU (Intel i5/Ryzen 5 class or better).
+- 8 GB RAM minimum (16 GB recommended when running additional mapping utilities).
+- 2 GB of available disk space for application assets, caches, and map tiles.
+- A GPU that supports OpenGL 3.3 for optimal PySide6 rendering.
+
+### Recommended Workflow
+
+1. **Create a virtual environment** to isolate dependencies:
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
+   ```
+
+2. **Install dependencies**. A `requirements.txt` lock file is still pending, so install the essential packages manually:
+
+   ```bash
+   pip install --upgrade pip
+   pip install PySide6 PySide6-Addons PySide6-Charts
+   ```
+
+3. **Verify Qt compatibility** by running a simple sanity check:
+
+   ```bash
+   python -c "from PySide6.QtWidgets import QApplication; QApplication([])"
+   ```
+
+   The command should exit without errors, confirming that the Qt platform plugins are available.
+
+4. **Install optional tools** such as `pytest` for running the existing tests and `black`/`ruff` for linting once baselines are finalized.
+
+When deploying to field hardware such as rugged tablets, ensure the device firmware enables the GPU acceleration needed by PySide6 and that location services are accessible for navigation features.
 
 ## Running Hunt Pro
 
