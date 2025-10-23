@@ -1,21 +1,48 @@
 # Hunt Pro Roadmap
 
-The roadmap highlights upcoming improvements and strategic investments planned for Hunt Pro. Timelines are intentionally flexible to accommodate field feedback and environmental testing requirements.
+This roadmap is structured as nine progressive phases that build from core stability to advanced field intelligence. Timelines remain flexible so that feedback from deployments can guide prioritization.
 
-## Short Term
+## Phase 1 – Core Stabilization
+- Audit existing modules for critical bugs and create automated smoke tests around `main.py` entry points.
+- Document environment setup, including Python version support and baseline hardware requirements.
+- Establish linting and formatting baselines to ensure consistent contributions.
 
-- **Dependency manifest** – Publish a `requirements.txt` that documents the minimum PySide6 packages and scientific dependencies needed to run the application.
-- **Automated tests** – Add unit tests for calculations in `ballistics.py` and data persistence in `game_log.py`.
-- **Configuration UX** – Expose module settings (paths, calibration data, default profiles) through consistent dialogs and validate inputs before saving.
+## Phase 2 – Dependency & Build Infrastructure
+- Publish a complete `requirements.txt` and optional lock file for reproducible environments.
+- Configure continuous integration to execute unit tests and static analysis on pull requests.
+- Provide containerized development recipes to simplify onboarding for new contributors.
 
-## Medium Term
+## Phase 3 – Data Integrity & Persistence
+- Implement robust validation for hunt logs in `game_log.py`, including schema versioning.
+- Add automated backups and import/export routines for ballistic profiles in `ballistics.py`.
+- Introduce migration scripts that safely evolve stored data structures across releases.
 
-- **Offline mapping** – Integrate cached map tiles and enhanced GPS abstraction so navigation remains usable without connectivity.
-- **Sensor integrations** – Support Bluetooth rangefinders, weather meters, and shot timers through the modular device interface described in `main.py`.
-- **Data export** – Provide CSV/JSON export for hunts logged in `game_log.py` and ballistic profiles in `ballistics.py`.
+## Phase 4 – Configuration Experience
+- Design a unified settings interface surfaced from `main.py` with clear grouping and tooltips.
+- Add input validation and contextual error messages before persisting configuration changes.
+- Support profile presets so operators can switch loadouts or regions with a single action.
 
-## Long Term
+## Phase 5 – Mapping & Navigation Evolution
+- Integrate offline map tile caching with fallback rendering when connectivity is limited.
+- Enhance `nav_map.py` to support terrain overlays, elevation contours, and point-of-interest tagging.
+- Improve GPS abstraction to accept simulated feeds for training scenarios.
 
-- **Mobile companion** – Explore a synchronized mobile companion app for quick field data capture and offline sync.
-- **Collaborative hunts** – Implement team-based session sharing with live location and event streaming via peer-to-peer networking.
-- **Machine learning insights** – Use historical hunt data to recommend stands, predict animal movement, and optimize loadouts.
+## Phase 6 – Sensor & Device Integrations
+- Expand the modular device manager to pair Bluetooth rangefinders, weather meters, and shot timers.
+- Create a plug-in protocol so third-party hardware vendors can contribute adapters.
+- Surface real-time sensor diagnostics and calibration workflows within the UI.
+
+## Phase 7 – Collaboration & Data Sharing
+- Implement secure session sharing with real-time teammate locations and event annotations.
+- Offer export options (CSV, JSON, KML) for hunts and ballistic data for interoperability.
+- Provide role-based permissions for guiding teams versus observers.
+
+## Phase 8 – Mobile & Companion Experiences
+- Prototype a synchronized mobile companion for quick logging and offline sync.
+- Enable push notifications for key events (shots fired, target sightings, environmental alerts).
+- Allow limited offline editing on mobile with reconciliation once connectivity returns.
+
+## Phase 9 – Intelligent Insights & Automation
+- Apply machine learning to historical hunts to recommend stands and predict movement patterns.
+- Deliver adaptive ballistic suggestions based on live sensor input and environmental conditions.
+- Introduce after-action reports that summarize performance and highlight improvement areas.
