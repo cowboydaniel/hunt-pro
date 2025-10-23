@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+include = "\\.(pyi?)$"
+exclude = [
+    "build/",
+    "dist/",
+    "docs/_build/",
+    "venv/",
+    ".venv/",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # bugbear
+]
+ignore = [
+    "E203",  # handled by black
+    "E266",  # allow dense module docstrings
+]
+exclude = [
+    "build",
+    "dist",
+    "docs/_build",
+    "venv",
+    ".venv",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "ballistics",
+    "game_log",
+    "keyboard",
+    "logger",
+    "main",
+    "nav_map",
+    "numpad",
+]
+combine-as-imports = true

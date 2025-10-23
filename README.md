@@ -41,7 +41,13 @@ Hunt Pro is a PySide6 desktop assistant designed to support hunters with modern 
    pip install PySide6 PySide6-Addons PySide6-Charts
    ```
 
-3. **Verify Qt compatibility** by running a simple sanity check:
+3. **Install developer tooling** to use the shared linting and formatting baselines:
+
+   ```bash
+   pip install -r requirements-dev.txt
+   ```
+
+4. **Verify Qt compatibility** by running a simple sanity check:
 
    ```bash
    python -c "from PySide6.QtWidgets import QApplication; QApplication([])"
@@ -49,7 +55,7 @@ Hunt Pro is a PySide6 desktop assistant designed to support hunters with modern 
 
    The command should exit without errors, confirming that the Qt platform plugins are available.
 
-4. **Install optional tools** such as `pytest` for running the existing tests and `black`/`ruff` for linting once baselines are finalized.
+5. **Install optional tools** such as `pytest` for running the existing tests.
 
 When deploying to field hardware such as rugged tablets, ensure the device firmware enables the GPU acceleration needed by PySide6 and that location services are accessible for navigation features.
 
