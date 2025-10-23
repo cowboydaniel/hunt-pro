@@ -34,11 +34,18 @@ Hunt Pro is a PySide6 desktop assistant designed to support hunters with modern 
    source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
    ```
 
-2. **Install dependencies**. A `requirements.txt` lock file is still pending, so install the essential packages manually:
+2. **Install dependencies** using the published requirement sets:
 
    ```bash
    pip install --upgrade pip
-   pip install PySide6 PySide6-Addons PySide6-Charts
+   pip install -r requirements.txt
+   ```
+
+   For fully reproducible environments (for example on CI agents) use the locked
+   constraints:
+
+   ```bash
+   pip install -r requirements-lock.txt
    ```
 
 3. **Install developer tooling** to use the shared linting and formatting baselines:
