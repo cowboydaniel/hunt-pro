@@ -9,7 +9,7 @@ This roadmap is structured as nine progressive phases that build from core stabi
 
 ## Phase 2 – Dependency & Build Infrastructure
 - [x] Publish a complete `requirements.txt` and optional lock file for reproducible environments.
-- Configure continuous integration to execute unit tests and static analysis on pull requests.
+- [x] Configure continuous integration to execute unit tests and static analysis on pull requests.
 - Provide containerized development recipes to simplify onboarding for new contributors.
 
 ## Phase 3 – Data Integrity & Persistence
