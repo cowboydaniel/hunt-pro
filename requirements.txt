@@ -3,5 +3,3 @@
 PySide6>=6.7,<6.8
 # Optional Qt add-on modules such as QtCharts live in this distribution.
 PySide6-Addons>=6.7,<6.8
-# Explicit chart bindings ensure compatibility with the analytics dashboards.
-PySide6-Charts>=6.7,<6.8
