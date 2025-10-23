@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1.4
+FROM python:3.11-slim
+
+ARG USERNAME=developer
+ARG UID=1000
+ARG GID=1000
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        libgl1 \
+        libglib2.0-0 \
+        libxkbcommon0 \
+        libxcb-xinerama0 \
+        libxcb-cursor0 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+COPY requirements.txt requirements-dev.txt requirements-lock.txt pyproject.toml ./
+
+RUN pip install --upgrade pip && \
+    pip install -r requirements-dev.txt
+
+COPY . .
+
+RUN if ! getent group "$GID" >/dev/null; then \
+        groupadd --gid "$GID" "$USERNAME"; \
+    fi && \
+    if ! id -u "$USERNAME" >/dev/null 2>&1; then \
+        useradd --uid "$UID" --gid "$GID" --create-home "$USERNAME"; \
+    fi && \
+    chown -R "$USERNAME":"$USERNAME" /workspace
+
+USER $USERNAME
+
+CMD ["bash"]

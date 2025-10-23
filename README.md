@@ -66,6 +66,17 @@ Hunt Pro is a PySide6 desktop assistant designed to support hunters with modern 
 
 When deploying to field hardware such as rugged tablets, ensure the device firmware enables the GPU acceleration needed by PySide6 and that location services are accessible for navigation features.
 
+### Containerized Development
+
+If you prefer an isolated Docker-based workflow, build the development image and start a shell with:
+
+```bash
+docker build -f Dockerfile.dev -t hunt-pro-dev .
+docker run --rm -it -v "$(pwd)":/workspace -w /workspace hunt-pro-dev bash
+```
+
+The container includes all runtime and developer dependencies plus Qt libraries required by PySide6. See [docs/container-development.md](docs/container-development.md) for additional options such as forwarding a display server to run the GUI from inside the container.
+
 ## Running Hunt Pro
 
 Run the main entry point with:
