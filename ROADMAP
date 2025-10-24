@@ -26,7 +26,7 @@ This roadmap is structured as nine progressive phases that build from core stabi
 - [x] Surface real-time sensor diagnostics and calibration workflows within the UI.
 ## Phase 7 – Collaboration & Data Sharing
 - [x] Implement secure session sharing with real-time teammate locations and event annotations.
-- Offer export options (CSV, JSON, KML) for hunts and ballistic data for interoperability.
+- [x] Offer export options (CSV, JSON, KML) for hunts and ballistic data for interoperability.
 - Provide role-based permissions for guiding teams versus observers.
 ## Phase 8 – Mobile & Companion Experiences
 - Prototype a synchronized mobile companion for quick logging and offline sync.

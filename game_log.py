@@ -5,6 +5,7 @@ and field observations with detailed statistics and export capabilities.
 """
 import json
 import csv
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime, date, time as time_module
 from typing import List, Dict, Optional, Any, Union, Tuple
@@ -483,6 +484,8 @@ class ExportThread(QThread):
                 self.export_json()
             elif self.format_type == "CSV":
                 self.export_csv()
+            elif self.format_type == "KML":
+                self.export_kml()
             elif self.format_type == "HTML":
                 self.export_html()
             else:
@@ -544,6 +547,57 @@ class ExportThread(QThread):
         with open(self.file_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
         self.export_progress.emit(100)
+
+    def export_kml(self):
+        """Export to KML format for mapping hunts."""
+        kml = ET.Element('kml', xmlns="http://www.opengis.net/kml/2.2")
+        document = ET.SubElement(kml, 'Document')
+        ET.SubElement(document, 'name').text = 'Hunt Pro Game Log'
+        ET.SubElement(document, 'open').text = '1'
+
+        for index, entry in enumerate(self.entries):
+            placemark = ET.SubElement(document, 'Placemark')
+            ET.SubElement(placemark, 'name').text = f"{entry.entry_type.value} - {entry.species.value}"
+
+            timestamp_element = ET.SubElement(placemark, 'TimeStamp')
+            ET.SubElement(timestamp_element, 'when').text = entry.datetime_obj.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+            description_parts = [
+                f"Date: {entry.date_string}",
+                f"Time: {entry.time_string}",
+                f"Count: {entry.count}",
+                f"Location: {entry.location.name or 'Unknown'}",
+                f"Notes: {entry.notes or 'None'}",
+            ]
+            ET.SubElement(placemark, 'description').text = '\n'.join(description_parts)
+
+            if entry.location.longitude is not None and entry.location.latitude is not None:
+                point = ET.SubElement(placemark, 'Point')
+                ET.SubElement(point, 'coordinates').text = f"{entry.location.longitude},{entry.location.latitude},0"
+
+            extended_data = ET.SubElement(placemark, 'ExtendedData')
+            metadata = {
+                'EntryType': entry.entry_type.value,
+                'Species': entry.species.value,
+                'WeatherCondition': entry.weather.condition.value if entry.weather else None,
+                'WindDirection': entry.weather.wind_direction.value if entry.weather else None,
+                'WindSpeedKmh': entry.weather.wind_speed if entry.weather else None,
+                'TemperatureC': entry.weather.temperature if entry.weather else None,
+                'Weapon': entry.weapon,
+                'Ammunition': entry.ammunition,
+                'ShotDistanceMeters': entry.shot_distance,
+                'FieldDressed': entry.field_dressed,
+            }
+            for key, value in metadata.items():
+                if value in (None, ""):
+                    continue
+                data_element = ET.SubElement(extended_data, 'Data', name=key)
+                ET.SubElement(data_element, 'value').text = str(value)
+
+            self.export_progress.emit(int((index + 1) / len(self.entries) * 100))
+
+        tree = ET.ElementTree(kml)
+        tree.write(self.file_path, encoding='utf-8', xml_declaration=True)
     def generate_html_report(self) -> str:
         """Generate HTML report content."""
         html = """
@@ -903,7 +957,7 @@ class GameLogModule(BaseModule):
         export_group = QGroupBox("ðŸ’¾ Export Options")
         export_layout = QFormLayout()
         self.export_format_combo = QComboBox()
-        self.export_format_combo.addItems(["JSON", "CSV", "HTML"])
+        self.export_format_combo.addItems(["JSON", "CSV", "KML", "HTML"])
         self.export_format_combo.setMinimumHeight(50)
         export_layout.addRow("Format:", self.export_format_combo)
         # Date range
