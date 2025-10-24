@@ -130,7 +130,10 @@ from game_log import (  # noqa: E402  (import after installing stubs)
     WeatherCondition,
     WindDirection,
 )
-from intelligent_insights import HistoricalHuntInsightModel
+from intelligent_insights import (
+    HistoricalHuntInsightModel,
+    generate_after_action_report,
+)
 
 
 def _build_entry(
@@ -210,3 +213,58 @@ def test_movement_patterns_surface_peak_hours_and_hotspots():
     assert prediction.hotspot_locations[0] == "North Stand"
     assert pytest.approx(sum(prediction.hourly_intensity.values()), rel=1e-5) == 1.0
     assert prediction.hourly_intensity[6] > prediction.hourly_intensity[18]
+
+
+def test_after_action_report_surfaces_performance_and_improvements():
+    entries = [
+        _build_entry(location_name="Ridge Stand", hour=6, entry_type=EntryType.HARVEST),
+        _build_entry(location_name="Ridge Stand", hour=7, entry_type=EntryType.SIGHTING),
+        _build_entry(location_name="Ridge Stand", hour=8, entry_type=EntryType.TRACK),
+        _build_entry(
+            location_name="Marsh Edge",
+            hour=9,
+            entry_type=EntryType.SIGHTING,
+            weather_condition=WeatherCondition.HEAVY_RAIN,
+        ),
+        _build_entry(
+            location_name="Marsh Edge",
+            hour=10,
+            entry_type=EntryType.SIGHTING,
+            weather_condition=WeatherCondition.HEAVY_RAIN,
+        ),
+        _build_entry(
+            location_name="Marsh Edge",
+            hour=11,
+            entry_type=EntryType.TRACK,
+            weather_condition=WeatherCondition.HEAVY_RAIN,
+        ),
+        _build_entry(
+            location_name="Meadow", hour=12, entry_type=EntryType.SIGHTING, weather_condition=WeatherCondition.CLEAR
+        ),
+        GameEntry(
+            timestamp=datetime(2024, 10, 15, 13, 0).timestamp(),
+            entry_type=EntryType.SCOUT,
+            species=GameSpecies.WHITETAIL_DEER,
+            location=Location(name="Meadow"),
+            weather=Weather(condition=WeatherCondition.CLEAR, wind_direction=WindDirection.SOUTH),
+        ),
+    ]
+
+    report = generate_after_action_report(entries)
+
+    assert report.total_entries == len(entries)
+    assert report.harvests == 1
+    assert report.encounter_entries == 7
+    assert pytest.approx(report.harvest_success_rate, rel=1e-5) == 1 / 7
+
+    assert report.top_locations[0].label == "Ridge Stand"
+    heavy_rain = next(
+        outcome for outcome in report.weather_outcomes if outcome.label == WeatherCondition.HEAVY_RAIN.value
+    )
+    assert heavy_rain.attempts == 3
+    assert heavy_rain.successes == 0
+
+    notes = " ".join(report.improvement_opportunities).lower()
+    assert "harvest success rate" in notes
+    assert "marsh edge" in notes
+    assert "scouting" in notes
