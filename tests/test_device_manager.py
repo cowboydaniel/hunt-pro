@@ -1,0 +1,94 @@
+import pytest
+
+from device_manager import (
+    DeviceCapability,
+    DeviceIdentity,
+    DeviceManager,
+    DevicePairingError,
+    DeviceType,
+)
+
+
+def make_identity(serial: str = "001") -> DeviceIdentity:
+    return DeviceIdentity(
+        manufacturer="HuntPro",
+        model="FieldUnit",
+        serial_number=serial,
+        firmware="1.0.0",
+    )
+
+
+def test_pair_rangefinder_assigns_capabilities():
+    manager = DeviceManager()
+    device = manager.pair_bluetooth_device(
+        DeviceType.RANGEFINDER,
+        identity=make_identity("RF-123"),
+        address="01:02:03:04:05:06",
+        rssi=-70,
+        services=["huntpro.rangefinder", "battery"],
+        metadata={"max_range": 1200, "supports_inclination": True},
+    )
+
+    assert device.device_type is DeviceType.RANGEFINDER
+    assert DeviceCapability.DISTANCE_MEASUREMENT in device.capabilities
+    assert DeviceCapability.INCLINATION_MEASUREMENT in device.capabilities
+    assert device.metadata["calibration"] == "factory"
+
+
+def test_pair_weather_meter_requires_supported_sensors():
+    manager = DeviceManager()
+
+    with pytest.raises(DevicePairingError):
+        manager.pair_bluetooth_device(
+            DeviceType.WEATHER_METER,
+            identity=make_identity("WX-1"),
+            address="10:11:12:13:14:15",
+            rssi=-60,
+            services=["huntpro.weather"],
+            metadata={"sensors": []},
+        )
+
+    device = manager.pair_bluetooth_device(
+        DeviceType.WEATHER_METER,
+        identity=make_identity("WX-2"),
+        address="20:21:22:23:24:25",
+        rssi=-61,
+        services=["huntpro.weather"],
+        metadata={"sensors": ["temperature", "wind_speed"]},
+    )
+
+    assert DeviceCapability.TEMPERATURE in device.capabilities
+    assert DeviceCapability.WIND_SPEED in device.capabilities
+    assert device.metadata["sample_rate_hz"] == 1
+
+
+def test_pair_shot_timer_tracks_strings_by_default():
+    manager = DeviceManager()
+    device = manager.pair_bluetooth_device(
+        DeviceType.SHOT_TIMER,
+        identity=make_identity("ST-007"),
+        address="AA:BB:CC:DD:EE:FF",
+        rssi=-72,
+        services=["huntpro.shot_timer"],
+        metadata={"min_split_ms": 60, "sensitivity_db": 95},
+    )
+
+    assert DeviceCapability.SHOT_DETECTION in device.capabilities
+    assert DeviceCapability.SPLIT_TIMES in device.capabilities
+    assert manager.get_device(device.device_id) is device
+
+
+def test_unpair_device_removes_and_logs():
+    manager = DeviceManager()
+    device = manager.pair_bluetooth_device(
+        DeviceType.RANGEFINDER,
+        identity=make_identity("RF-321"),
+        address="06:05:04:03:02:01",
+        rssi=-65,
+        services=["huntpro.rangefinder"],
+        metadata={"max_range": 1500},
+    )
+
+    removed = manager.unpair_device(device.device_id)
+    assert removed is device
+    assert manager.get_device(device.device_id) is None
