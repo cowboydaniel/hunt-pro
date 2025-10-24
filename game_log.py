@@ -63,6 +63,7 @@ from PySide6.QtCharts import QChart, QChartView, QPieSeries, QBarSeries, QBarSet
 from main import BaseModule
 
 from logger import get_logger, LoggableMixin
+from migrations import migrate_game_log_store, MigrationError
 
 
 GAME_LOG_SCHEMA_VERSION = 1
@@ -2960,7 +2961,51 @@ class GameLogModule(BaseModule):
 
                 return
 
-            
+
+            try:
+
+                outcome = migrate_game_log_store(
+
+                    self.data_file,
+
+                    validator=GameLogValidator,
+
+                    target_version=GameLogValidator.CURRENT_VERSION,
+
+                    logger=self._logger,
+
+                )
+
+            except MigrationError as exc:
+
+                self.log_error("Failed to migrate game log data", exception=exc)
+
+                self.error_occurred.emit(
+
+                    "Migration Error",
+
+                    f"Could not migrate game log data: {exc}",
+
+                )
+
+                return
+
+            if outcome:
+
+                self.log_info(
+
+                    "Migrated game log data file",
+
+                    category="DATA",
+
+                    previous_version=outcome.previous_version,
+
+                    new_version=outcome.new_version,
+
+                    backup=str(outcome.backup_path) if outcome.backup_path else None,
+
+                )
+
 
             with open(self.data_file, 'r', encoding='utf-8') as f:
                 raw_data = json.load(f)
