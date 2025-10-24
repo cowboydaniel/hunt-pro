@@ -58,6 +58,10 @@ from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from main import BaseModule
 
 from logger import get_logger, LoggableMixin
+from migrations import migrate_ballistic_profile_store, MigrationError
+
+
+BALLISTIC_PROFILE_SCHEMA_VERSION = 1
 
 
 
@@ -1008,6 +1012,9 @@ class BallisticProfileStorage(LoggableMixin):
     """Manage persistence for ballistic profiles with automated backups."""
 
 
+    SCHEMA_VERSION = BALLISTIC_PROFILE_SCHEMA_VERSION
+
+
     def __init__(self, storage_dir: Optional[Path] = None, max_backups: int = 5):
 
         super().__init__()
@@ -1027,6 +1034,51 @@ class BallisticProfileStorage(LoggableMixin):
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+
+        self._apply_migrations()
+
+
+    def _apply_migrations(self) -> None:
+
+        try:
+
+            outcome = migrate_ballistic_profile_store(
+
+                self.storage_file,
+
+                loader=BallisticProfile.from_dict,
+
+                dumper=lambda profile: profile.to_dict(),
+
+                target_version=self.SCHEMA_VERSION,
+
+                backup_dir=self.backup_dir,
+
+                logger=self._logger,
+
+            )
+
+        except MigrationError as exc:
+
+            self.log_error("Failed to migrate ballistic profile store", exception=exc)
+
+            raise
+
+        if outcome:
+
+            self.log_info(
+
+                "Migrated ballistic profile store",
+
+                category="DATA",
+
+                previous_version=outcome.previous_version,
+
+                new_version=outcome.new_version,
+
+                backup=str(outcome.backup_path) if outcome.backup_path else None,
+
+            )
 
 
     def load_profiles(self) -> Dict[str, BallisticProfile]:
@@ -1269,7 +1321,7 @@ class BallisticProfileStorage(LoggableMixin):
 
         payload = {
 
-            "version": 1,
+            "version": self.SCHEMA_VERSION,
 
             "updated_at": datetime.now(timezone.utc).isoformat(),
 
