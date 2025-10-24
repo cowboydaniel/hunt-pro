@@ -27,7 +27,7 @@ This roadmap is structured as nine progressive phases that build from core stabi
 ## Phase 7 – Collaboration & Data Sharing
 - [x] Implement secure session sharing with real-time teammate locations and event annotations.
 - [x] Offer export options (CSV, JSON, KML) for hunts and ballistic data for interoperability.
-- Provide role-based permissions for guiding teams versus observers.
+- [x] Provide role-based permissions for guiding teams versus observers.
 ## Phase 8 – Mobile & Companion Experiences
 - Prototype a synchronized mobile companion for quick logging and offline sync.
 - Enable push notifications for key events (shots fired, target sightings, environmental alerts).
