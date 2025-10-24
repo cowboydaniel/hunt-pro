@@ -34,7 +34,11 @@ from PySide6.QtWidgets import (
 
     QTabWidget, QPushButton, QLabel, QStatusBar, QMessageBox,
 
-    QSplashScreen, QSystemTrayIcon, QMenu, QFrame, QScrollArea
+    QSplashScreen, QSystemTrayIcon, QMenu, QFrame, QScrollArea,
+
+    QDialog, QFormLayout, QGroupBox, QDialogButtonBox, QLineEdit,
+
+    QCheckBox, QComboBox, QSpinBox
 
 )
 
@@ -197,6 +201,269 @@ class BaseModule(QWidget):
         except Exception as e:
 
             self.logger.warning(f"Failed to install virtual inputs on {self.module_name}", exception=e)
+
+
+
+class SettingsDialog(QDialog):
+    # Unified application settings interface with grouped controls.
+
+    def __init__(self, parent: Optional[QWidget], settings: QSettings):
+        super().__init__(parent)
+        self.settings = settings
+        self.setWindowTitle('Hunt Pro Settings')
+        self.setModal(True)
+        self.resize(720, 520)
+
+        self._build_ui()
+        self.load_settings()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+
+        self.tab_widget = QTabWidget()
+        self.tab_widget.addTab(self._create_general_tab(), 'General')
+        self.tab_widget.addTab(self._create_display_tab(), 'Display')
+        self.tab_widget.addTab(self._create_modules_tab(), 'Modules')
+
+        layout.addWidget(self.tab_widget)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def _create_general_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(12)
+
+        identity_group = QGroupBox('Operator Identity')
+        identity_form = QFormLayout()
+        identity_form.setLabelAlignment(Qt.AlignRight)
+
+        self.call_sign_edit = QLineEdit()
+        self.call_sign_edit.setPlaceholderText('E.g. Falcon-01')
+        self.call_sign_edit.setToolTip('Used for log exports, device pairing, and teammate callouts.')
+        identity_form.addRow('Call Sign', self.call_sign_edit)
+
+        self.primary_region_combo = QComboBox()
+        self.primary_region_combo.addItems([
+            'North America',
+            'South America',
+            'Europe',
+            'Africa',
+            'Asia-Pacific'
+        ])
+        self.primary_region_combo.setToolTip('Determines localized presets like sunrise calculations and measurement units.')
+        identity_form.addRow('Primary Region', self.primary_region_combo)
+
+        identity_group.setLayout(identity_form)
+        layout.addWidget(identity_group)
+
+        operations_group = QGroupBox('Field Operations')
+        operations_form = QFormLayout()
+        operations_form.setLabelAlignment(Qt.AlignRight)
+
+        self.log_retention_spin = QSpinBox()
+        self.log_retention_spin.setRange(7, 365)
+        self.log_retention_spin.setSuffix(' days')
+        self.log_retention_spin.setToolTip('Number of days to retain hunt logs before archival.')
+        operations_form.addRow('Log Retention', self.log_retention_spin)
+
+        self.auto_backup_checkbox = QCheckBox('Enable automatic cloud backups')
+        self.auto_backup_checkbox.setToolTip('Synchronizes critical hunt data to linked storage whenever connectivity is detected.')
+        operations_form.addRow('Cloud Backup', self.auto_backup_checkbox)
+
+        self.prompt_before_sync_checkbox = QCheckBox('Prompt before syncing over cellular data')
+        self.prompt_before_sync_checkbox.setToolTip('Avoid unexpected data usage by confirming large uploads on metered connections.')
+        operations_form.addRow('Cellular Sync', self.prompt_before_sync_checkbox)
+
+        operations_group.setLayout(operations_form)
+        layout.addWidget(operations_group)
+
+        behavior_group = QGroupBox('Application Behavior')
+        behavior_form = QFormLayout()
+        behavior_form.setLabelAlignment(Qt.AlignRight)
+
+        self.launch_on_start_checkbox = QCheckBox('Start Hunt Pro when my system boots')
+        self.launch_on_start_checkbox.setToolTip('Adds Hunt Pro to the operating system boot sequence.')
+        behavior_form.addRow('Autostart', self.launch_on_start_checkbox)
+
+        self.show_tips_checkbox = QCheckBox('Show workflow tips on launch')
+        self.show_tips_checkbox.setToolTip('Surface quick reminders for safety checks and calibration tasks when the app opens.')
+        behavior_form.addRow('Helpful Tips', self.show_tips_checkbox)
+
+        behavior_group.setLayout(behavior_form)
+        layout.addWidget(behavior_group)
+
+        layout.addStretch()
+        return tab
+
+    def _create_display_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(12)
+
+        appearance_group = QGroupBox('Appearance')
+        appearance_form = QFormLayout()
+        appearance_form.setLabelAlignment(Qt.AlignRight)
+
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(['Dark', 'Light', 'Auto'])
+        self.theme_combo.setToolTip('Switch between dark, light, or automatic theming based on ambient light sensors.')
+        appearance_form.addRow('Theme', self.theme_combo)
+
+        self.font_scale_spin = QSpinBox()
+        self.font_scale_spin.setRange(80, 140)
+        self.font_scale_spin.setSuffix(' %')
+        self.font_scale_spin.setSingleStep(5)
+        self.font_scale_spin.setToolTip('Adjust text scaling for improved readability in different lighting conditions.')
+        appearance_form.addRow('Font Scale', self.font_scale_spin)
+
+        self.high_contrast_checkbox = QCheckBox('Enable high contrast overlays')
+        self.high_contrast_checkbox.setToolTip('Enhances separation between map overlays and UI chrome for gloved operation.')
+        appearance_form.addRow('High Contrast', self.high_contrast_checkbox)
+
+        appearance_group.setLayout(appearance_form)
+        layout.addWidget(appearance_group)
+
+        units_group = QGroupBox('Units & Measurements')
+        units_form = QFormLayout()
+        units_form.setLabelAlignment(Qt.AlignRight)
+
+        self.distance_units_combo = QComboBox()
+        self.distance_units_combo.addItems(['Metric (meters)', 'Imperial (yards)'])
+        self.distance_units_combo.setToolTip('Sets preferred distance units for range cards, GPS readouts, and ballistic charts.')
+        units_form.addRow('Distance Units', self.distance_units_combo)
+
+        self.temperature_units_combo = QComboBox()
+        self.temperature_units_combo.addItems(['Celsius', 'Fahrenheit'])
+        self.temperature_units_combo.setToolTip('Controls how environmental sensors report ambient conditions.')
+        units_form.addRow('Temperature', self.temperature_units_combo)
+
+        units_group.setLayout(units_form)
+        layout.addWidget(units_group)
+
+        layout.addStretch()
+        return tab
+
+    def _create_modules_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(12)
+
+        overview_label = QLabel(
+            'Toggle which mission-critical modules load at startup. Tooltips describe each module role in the field.'
+        )
+        overview_label.setWordWrap(True)
+        layout.addWidget(overview_label)
+
+        modules_group = QGroupBox('Startup Modules')
+        modules_layout = QVBoxLayout()
+
+        self.module_checkboxes: Dict[str, QCheckBox] = {}
+        module_descriptions = {
+            'ballistics': 'Calculates drop charts, wind holds, and rifle profiles for your active weapon systems.',
+            'nav_map': 'Provides offline maps, GPS breadcrumbs, and waypoint management for navigation.',
+            'game_log': 'Captures harvest data, sightings, and tag compliance notes during hunts.'
+        }
+
+        for module_key, description in module_descriptions.items():
+            checkbox = QCheckBox(module_key.replace('_', ' ').title())
+            checkbox.setToolTip(description)
+            modules_layout.addWidget(checkbox)
+            self.module_checkboxes[module_key] = checkbox
+
+        modules_group.setLayout(modules_layout)
+        layout.addWidget(modules_group)
+
+        layout.addStretch()
+        return tab
+
+    def load_settings(self):
+        self.call_sign_edit.setText(self.settings.value('general/call_sign', ''))
+        region = self.settings.value('general/primary_region', 'North America')
+        index = self.primary_region_combo.findText(region)
+        if index >= 0:
+            self.primary_region_combo.setCurrentIndex(index)
+
+        self.log_retention_spin.setValue(int(self.settings.value('general/log_retention', 30)))
+        self.auto_backup_checkbox.setChecked(self.settings.value('general/auto_backup', True, bool))
+        self.prompt_before_sync_checkbox.setChecked(
+            self.settings.value('general/prompt_before_sync', True, bool)
+        )
+        self.launch_on_start_checkbox.setChecked(self.settings.value('general/launch_on_start', False, bool))
+        self.show_tips_checkbox.setChecked(self.settings.value('general/show_tips', True, bool))
+
+        theme = self.settings.value('display/theme', 'Dark')
+        index = self.theme_combo.findText(theme)
+        if index >= 0:
+            self.theme_combo.setCurrentIndex(index)
+
+        self.font_scale_spin.setValue(int(self.settings.value('display/font_scale', 100)))
+        self.high_contrast_checkbox.setChecked(self.settings.value('display/high_contrast', False, bool))
+
+        distance_units = self.settings.value('display/distance_units', 'Metric (meters)')
+        index = self.distance_units_combo.findText(distance_units)
+        if index >= 0:
+            self.distance_units_combo.setCurrentIndex(index)
+
+        temperature_units = self.settings.value('display/temperature_units', 'Celsius')
+        index = self.temperature_units_combo.findText(temperature_units)
+        if index >= 0:
+            self.temperature_units_combo.setCurrentIndex(index)
+
+        for module_key, checkbox in self.module_checkboxes.items():
+            checkbox.setChecked(self.settings.value(f'modules/{module_key}', True, bool))
+
+    def save_settings(self):
+        self.settings.setValue('general/call_sign', self.call_sign_edit.text().strip())
+        self.settings.setValue('general/primary_region', self.primary_region_combo.currentText())
+        self.settings.setValue('general/log_retention', self.log_retention_spin.value())
+        self.settings.setValue('general/auto_backup', self.auto_backup_checkbox.isChecked())
+        self.settings.setValue('general/prompt_before_sync', self.prompt_before_sync_checkbox.isChecked())
+        self.settings.setValue('general/launch_on_start', self.launch_on_start_checkbox.isChecked())
+        self.settings.setValue('general/show_tips', self.show_tips_checkbox.isChecked())
+
+        self.settings.setValue('display/theme', self.theme_combo.currentText())
+        self.settings.setValue('display/font_scale', self.font_scale_spin.value())
+        self.settings.setValue('display/high_contrast', self.high_contrast_checkbox.isChecked())
+        self.settings.setValue('display/distance_units', self.distance_units_combo.currentText())
+        self.settings.setValue('display/temperature_units', self.temperature_units_combo.currentText())
+
+        for module_key, checkbox in self.module_checkboxes.items():
+            self.settings.setValue(f'modules/{module_key}', checkbox.isChecked())
+
+    def validate_inputs(self) -> bool:
+        call_sign = self.call_sign_edit.text().strip()
+        if len(call_sign) < 3:
+            QMessageBox.warning(
+                self,
+                'Invalid Call Sign',
+                'Your call sign should be at least three characters to help teammates recognize you.'
+            )
+            self.call_sign_edit.setFocus()
+            return False
+
+        retention = self.log_retention_spin.value()
+        if retention < 7:
+            QMessageBox.warning(
+                self,
+                'Retention Too Low',
+                'Retaining logs for fewer than seven days risks losing compliance history.'
+            )
+            self.log_retention_spin.setFocus()
+            return False
+
+        return True
+
+    def accept(self):
+        if not self.validate_inputs():
+            return
+
+        self.save_settings()
+        super().accept()
 
     
 
@@ -1110,7 +1377,11 @@ class MainWindow(QMainWindow):
 
         """Show application settings dialog."""
 
-        QMessageBox.information(self, "Settings", "Settings dialog coming soon!")
+        dialog = SettingsDialog(self, self.settings)
+
+        if dialog.exec() == QDialog.Accepted:
+
+            self.status_bar.showMessage('Settings updated', 5000)
 
     
 
