@@ -528,7 +528,6 @@ try:  # pragma: no cover - optional Qt dependency
         Qt, Signal, QTimer, QThread, QObject, QSettings
     )
     from PySide6.QtGui import QFont, QColor, QPainter, QPen
-    from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
     from main import BaseModule
     _QT_AVAILABLE = True
 except ImportError:  # pragma: no cover - executed when Qt bindings missing
@@ -543,9 +542,15 @@ except ImportError:  # pragma: no cover - executed when Qt bindings missing
     QHeaderView = QMessageBox = QFileDialog = None  # type: ignore
     Qt = Signal = QTimer = QThread = QObject = QSettings = None  # type: ignore
     QFont = QColor = QPainter = QPen = None  # type: ignore
-    QChart = QChartView = QLineSeries = QValueAxis = None  # type: ignore
     BaseModule = object  # type: ignore[assignment]
     _QT_AVAILABLE = False
+
+try:  # pragma: no cover - QtCharts is optional at runtime
+    from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
+    _QT_CHARTS_AVAILABLE = True
+except ImportError:  # pragma: no cover - provide graceful degradation
+    QChart = QChartView = QLineSeries = QValueAxis = None  # type: ignore
+    _QT_CHARTS_AVAILABLE = False
 @dataclass
 class BallisticProfile:
     """Serialized snapshot capturing a complete ballistic setup."""
@@ -1180,8 +1185,17 @@ if _QT_AVAILABLE:
             self.results_tabs = QTabWidget()
             layout.addWidget(self.results_tabs)
             # Trajectory chart tab
-            self.chart_view = QChartView()
-            self.results_tabs.addTab(self.chart_view, "ðŸ“ˆ Trajectory Chart")
+            if _QT_CHARTS_AVAILABLE and QChartView is not None:
+                self.chart_view = QChartView()
+                self.results_tabs.addTab(self.chart_view, "ðŸ“ˆ Trajectory Chart")
+            else:
+                self.chart_view = None
+                placeholder = QLabel(
+                    "QtCharts is not available. Trajectory visualisations are disabled."
+                )
+                placeholder.setWordWrap(True)
+                placeholder.setAlignment(Qt.AlignCenter)
+                self.results_tabs.addTab(placeholder, "ðŸ“ˆ Trajectory Chart")
             # Data table tab
             self.create_data_table_tab()
             # Come-ups tab
@@ -1450,6 +1464,8 @@ if _QT_AVAILABLE:
         def update_trajectory_chart(self):
             """Update the trajectory chart."""
             if not self.current_result:
+                return
+            if not _QT_CHARTS_AVAILABLE or self.chart_view is None or QChart is None:
                 return
             try:
                 chart = QChart()

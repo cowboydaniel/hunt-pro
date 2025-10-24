@@ -12,21 +12,116 @@ from typing import List, Dict, Optional, Any, Union, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum, auto
 import uuid
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
-    QTabWidget, QPushButton, QLabel, QLineEdit, QTextEdit, QSpinBox,
-    QDoubleSpinBox, QComboBox, QCheckBox, QDateEdit, QTimeEdit,
-    QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
-    QScrollArea, QProgressBar, QMessageBox, QFileDialog,
-    QFrame, QSplitter, QTreeWidget, QTreeWidgetItem
-)
-from PySide6.QtCore import (
-    Qt, Signal, QTimer, QThread, QDate, QTime, QDateTime,
-    QSettings, QAbstractTableModel, QModelIndex
-)
-from PySide6.QtGui import QFont, QColor, QPixmap, QPainter
-from PySide6.QtCharts import QChart, QChartView, QPieSeries, QBarSeries, QBarSet
-from main import BaseModule
+try:  # pragma: no cover - optional Qt dependency
+    from PySide6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
+        QTabWidget, QPushButton, QLabel, QLineEdit, QTextEdit, QSpinBox,
+        QDoubleSpinBox, QComboBox, QCheckBox, QDateEdit, QTimeEdit,
+        QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
+        QScrollArea, QProgressBar, QMessageBox, QFileDialog,
+        QFrame, QSplitter, QTreeWidget, QTreeWidgetItem
+    )
+    from PySide6.QtCore import (
+        Qt, Signal, QTimer, QThread, QDate, QTime, QDateTime,
+        QSettings, QAbstractTableModel, QModelIndex
+    )
+    from PySide6.QtGui import QFont, QColor, QPixmap, QPainter
+    from main import BaseModule
+    _QT_AVAILABLE = True
+except ImportError:  # pragma: no cover - executed when Qt bindings unavailable
+    class _QtStub:
+        def __init__(self, *_, **__):
+            pass
+
+        def __call__(self, *_, **__):
+            return _QtStub()
+
+        def __getattr__(self, _):
+            return _QtStub()
+
+        def __bool__(self):
+            return False
+
+    class _SignalStub:
+        def connect(self, *_, **__):
+            pass
+
+        def emit(self, *_, **__):
+            pass
+
+    def Signal(*_, **__):  # type: ignore[override]
+        return _SignalStub()
+
+    class _TimerStub(_QtStub):
+        def __init__(self, *_, **__):
+            super().__init__()
+            self.timeout = _SignalStub()
+
+        def setInterval(self, *_, **__):
+            pass
+
+        def start(self, *_, **__):
+            pass
+
+        def stop(self, *_, **__):
+            pass
+
+    class _ThreadStub(_QtStub):
+        def start(self, *_, **__):
+            pass
+
+        def quit(self, *_, **__):
+            pass
+
+        def wait(self, *_, **__):
+            pass
+
+    class _SettingsStub(dict):
+        def value(self, key, default=None, type=None):  # type: ignore[override]
+            return super().get(key, default)
+
+        def setValue(self, key, value):  # type: ignore[override]
+            self[key] = value
+
+    class _QtNamespace:
+        AlignRight = 0
+        AlignCenter = 0
+        AlignBottom = 0
+        Horizontal = 1
+        UserRole = 32
+        ScrollBarAsNeeded = 0
+
+    QWidget = QVBoxLayout = QHBoxLayout = QFormLayout = QGridLayout = _QtStub
+    QTabWidget = QPushButton = QLabel = QLineEdit = QTextEdit = QSpinBox = _QtStub
+    QDoubleSpinBox = QComboBox = QCheckBox = QDateEdit = QTimeEdit = _QtStub
+    QTableWidget = QTableWidgetItem = QHeaderView = QGroupBox = _QtStub
+    QScrollArea = QProgressBar = QMessageBox = QFileDialog = _QtStub
+    QFrame = QSplitter = QTreeWidget = QTreeWidgetItem = _QtStub
+    QTimer = _TimerStub
+    QThread = _ThreadStub
+    QDate = QTime = QDateTime = _QtStub
+    QSettings = _SettingsStub
+    QAbstractTableModel = QModelIndex = _QtStub
+    Qt = _QtNamespace()
+    QFont = QColor = QPixmap = QPainter = _QtStub
+
+    class _BaseModuleStub:
+        def __init__(self, *_, **__):
+            pass
+
+    BaseModule = _BaseModuleStub  # type: ignore[assignment]
+    _QT_AVAILABLE = False
+
+if _QT_AVAILABLE:
+    try:
+        from PySide6.QtCharts import QChart, QChartView, QPieSeries, QBarSeries, QBarSet
+        _GAMELOG_QT_CHARTS_AVAILABLE = True
+    except ImportError:  # pragma: no cover - charts optional at runtime
+        QChart = QChartView = QPieSeries = QBarSeries = QBarSet = None  # type: ignore
+        _GAMELOG_QT_CHARTS_AVAILABLE = False
+else:
+    QChart = QChartView = QPieSeries = QBarSeries = QBarSet = None  # type: ignore
+    _GAMELOG_QT_CHARTS_AVAILABLE = False
 from logger import get_logger, LoggableMixin
 from migrations import migrate_game_log_store, MigrationError
 GAME_LOG_SCHEMA_VERSION = 1
@@ -940,13 +1035,33 @@ class GameLogModule(BaseModule):
         # Charts area
         charts_splitter = QSplitter(Qt.Horizontal)
         # Species chart
-        self.species_chart_view = QChartView()
-        self.species_chart_view.setMinimumHeight(300)
-        charts_splitter.addWidget(self.species_chart_view)
+        if _GAMELOG_QT_CHARTS_AVAILABLE and QChartView is not None:
+            self.species_chart_view = QChartView()
+            self.species_chart_view.setMinimumHeight(300)
+            charts_splitter.addWidget(self.species_chart_view)
+        else:
+            self.species_chart_view = None
+            species_placeholder = QLabel(
+                "QtCharts is not available. Species distribution visualisation is disabled."
+            )
+            species_placeholder.setWordWrap(True)
+            species_placeholder.setAlignment(Qt.AlignCenter)
+            species_placeholder.setMinimumHeight(200)
+            charts_splitter.addWidget(species_placeholder)
         # Monthly activity chart
-        self.activity_chart_view = QChartView()
-        self.activity_chart_view.setMinimumHeight(300)
-        charts_splitter.addWidget(self.activity_chart_view)
+        if _GAMELOG_QT_CHARTS_AVAILABLE and QChartView is not None:
+            self.activity_chart_view = QChartView()
+            self.activity_chart_view.setMinimumHeight(300)
+            charts_splitter.addWidget(self.activity_chart_view)
+        else:
+            self.activity_chart_view = None
+            activity_placeholder = QLabel(
+                "QtCharts is not available. Activity trends visualisation is disabled."
+            )
+            activity_placeholder.setWordWrap(True)
+            activity_placeholder.setAlignment(Qt.AlignCenter)
+            activity_placeholder.setMinimumHeight(200)
+            charts_splitter.addWidget(activity_placeholder)
         layout.addWidget(charts_splitter)
         return tab
     def _create_export_tab(self) -> QWidget:
@@ -1290,6 +1405,8 @@ class GameLogModule(BaseModule):
         self.update_activity_chart()
     def update_species_chart(self):
         """Update the species distribution pie chart."""
+        if not _GAMELOG_QT_CHARTS_AVAILABLE or self.species_chart_view is None or QPieSeries is None:
+            return
         try:
             # Count entries by species
             species_counts = {}
@@ -1312,6 +1429,8 @@ class GameLogModule(BaseModule):
             self.log_error("Failed to update species chart", exception=e)
     def update_activity_chart(self):
         """Update the monthly activity bar chart."""
+        if not _GAMELOG_QT_CHARTS_AVAILABLE or self.activity_chart_view is None or QBarSeries is None:
+            return
         try:
             # Count entries by month
             monthly_counts = {}
