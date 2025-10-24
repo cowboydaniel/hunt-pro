@@ -20,7 +20,7 @@ from pathlib import Path
 
 from datetime import datetime, date, time as time_module
 
-from typing import List, Dict, Optional, Any, Union
+from typing import List, Dict, Optional, Any, Union, Tuple
 
 from dataclasses import dataclass, asdict
 
@@ -63,6 +63,16 @@ from PySide6.QtCharts import QChart, QChartView, QPieSeries, QBarSeries, QBarSet
 from main import BaseModule
 
 from logger import get_logger, LoggableMixin
+
+
+GAME_LOG_SCHEMA_VERSION = 1
+
+
+class GameLogValidationError(Exception):
+
+    """Raised when game log data fails validation."""
+
+
 
 
 
@@ -371,6 +381,344 @@ class GameEntry:
         
 
         return cls(**data)
+
+
+
+class GameLogValidator:
+
+    """Validate and normalize persisted game log data."""
+
+    CURRENT_VERSION = GAME_LOG_SCHEMA_VERSION
+
+    SUPPORTED_VERSIONS = {0, CURRENT_VERSION}
+
+    @classmethod
+    def _normalize_enum(
+        cls,
+        enum_cls: Enum,
+        value: Any,
+        field_label: str,
+        entry_index: int,
+    ) -> str:
+        """Return the enum value ensuring it is valid."""
+
+        if isinstance(value, enum_cls):
+            return value.value
+
+        if isinstance(value, str):
+            try:
+                return enum_cls(value).value
+            except ValueError:
+                try:
+                    return enum_cls[value].value
+                except (KeyError, ValueError):
+                    raise GameLogValidationError(
+                        f"Entry {entry_index}: Invalid {field_label.lower()} '{value}'"
+                    ) from None
+
+        raise GameLogValidationError(
+            f"Entry {entry_index}: {field_label} must be a string"
+        )
+
+    @classmethod
+    def _normalize_timestamp(cls, value: Any, entry_index: int) -> float:
+        if isinstance(value, (int, float)):
+            timestamp = float(value)
+        elif isinstance(value, str):
+            try:
+                timestamp = datetime.fromisoformat(value).timestamp()
+            except ValueError as exc:
+                raise GameLogValidationError(
+                    f"Entry {entry_index}: Invalid timestamp string '{value}'"
+                ) from exc
+        else:
+            raise GameLogValidationError(
+                f"Entry {entry_index}: Timestamp must be a number or ISO formatted string"
+            )
+
+        if timestamp <= 0:
+            raise GameLogValidationError(
+                f"Entry {entry_index}: Timestamp must be a positive value"
+            )
+
+        return timestamp
+
+    @classmethod
+    def _normalize_optional_float(
+        cls, value: Any, field_label: str, entry_index: int
+    ) -> Optional[float]:
+        if value is None or value == "":
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError as exc:
+                raise GameLogValidationError(
+                    f"Entry {entry_index}: {field_label} must be numeric"
+                ) from exc
+        raise GameLogValidationError(
+            f"Entry {entry_index}: {field_label} must be numeric or null"
+        )
+
+    @classmethod
+    def _normalize_optional_int(
+        cls, value: Any, field_label: str, entry_index: int
+    ) -> Optional[int]:
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise GameLogValidationError(
+                f"Entry {entry_index}: {field_label} must be an integer"
+            )
+        if isinstance(value, (int, float)):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(float(value))
+            except ValueError as exc:
+                raise GameLogValidationError(
+                    f"Entry {entry_index}: {field_label} must be an integer"
+                ) from exc
+        raise GameLogValidationError(
+            f"Entry {entry_index}: {field_label} must be an integer"
+        )
+
+    @classmethod
+    def _normalize_bool(cls, value: Any, field_label: str, entry_index: int) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "yes", "1"}:
+                return True
+            if lowered in {"false", "no", "0"}:
+                return False
+        raise GameLogValidationError(
+            f"Entry {entry_index}: {field_label} must be a boolean"
+        )
+
+    @classmethod
+    def _normalize_photos(cls, value: Any, entry_index: int) -> List[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise GameLogValidationError(
+                f"Entry {entry_index}: Photos must be a list of file paths"
+            )
+        photos: List[str] = []
+        for photo in value:
+            if not isinstance(photo, str):
+                raise GameLogValidationError(
+                    f"Entry {entry_index}: Photo entries must be strings"
+                )
+            photos.append(photo)
+        return photos
+
+    @classmethod
+    def _normalize_notes(cls, value: Any, entry_index: int) -> str:
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise GameLogValidationError(
+                f"Entry {entry_index}: Notes must be a string"
+            )
+        return value
+
+    @classmethod
+    def _normalize_location(cls, value: Any, entry_index: int) -> Dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise GameLogValidationError(
+                f"Entry {entry_index}: Location must be an object"
+            )
+        normalized = {}
+        for key in [
+            "name",
+            "description",
+            "latitude",
+            "longitude",
+            "accuracy",
+            "altitude",
+        ]:
+            if key in value:
+                normalized[key] = value[key]
+        return normalized
+
+    @classmethod
+    def _normalize_weather(cls, value: Any, entry_index: int) -> Dict[str, Any]:
+        if value is None:
+            value = {}
+        if not isinstance(value, dict):
+            raise GameLogValidationError(
+                f"Entry {entry_index}: Weather must be an object"
+            )
+
+        normalized: Dict[str, Any] = {}
+        default_weather = Weather()
+        normalized["condition"] = cls._normalize_enum(
+            WeatherCondition,
+            value.get("condition", default_weather.condition),
+            "Weather Condition",
+            entry_index,
+        )
+
+        temperature = value.get("temperature")
+        if temperature is None or temperature == "":
+            normalized["temperature"] = default_weather.temperature
+        elif isinstance(temperature, (int, float)):
+            normalized["temperature"] = float(temperature)
+        elif isinstance(temperature, str):
+            try:
+                normalized["temperature"] = float(temperature)
+            except ValueError as exc:
+                raise GameLogValidationError(
+                    f"Entry {entry_index}: Temperature must be numeric"
+                ) from exc
+        else:
+            raise GameLogValidationError(
+                f"Entry {entry_index}: Temperature must be numeric"
+            )
+
+        normalized["humidity"] = cls._normalize_optional_float(
+            value.get("humidity"), "Humidity", entry_index
+        )
+        normalized["pressure"] = cls._normalize_optional_float(
+            value.get("pressure"), "Pressure", entry_index
+        )
+
+        wind_speed = value.get("wind_speed")
+        if wind_speed is None or wind_speed == "":
+            normalized["wind_speed"] = default_weather.wind_speed
+        elif isinstance(wind_speed, (int, float)):
+            normalized["wind_speed"] = float(wind_speed)
+        elif isinstance(wind_speed, str):
+            try:
+                normalized["wind_speed"] = float(wind_speed)
+            except ValueError as exc:
+                raise GameLogValidationError(
+                    f"Entry {entry_index}: Wind speed must be numeric"
+                ) from exc
+        else:
+            raise GameLogValidationError(
+                f"Entry {entry_index}: Wind speed must be numeric"
+            )
+        normalized["wind_direction"] = cls._normalize_enum(
+            WindDirection,
+            value.get("wind_direction", default_weather.wind_direction),
+            "Wind Direction",
+            entry_index,
+        )
+        normalized["visibility"] = cls._normalize_optional_float(
+            value.get("visibility"), "Visibility", entry_index
+        )
+        return normalized
+
+    @classmethod
+    def _normalize_entry(cls, entry: Dict[str, Any], entry_index: int) -> Dict[str, Any]:
+        if not isinstance(entry, dict):
+            raise GameLogValidationError(
+                f"Entry {entry_index}: Each entry must be an object"
+            )
+
+        normalized: Dict[str, Any] = {}
+
+        entry_id = entry.get("id")
+        if entry_id is None:
+            entry_id = str(uuid.uuid4())
+        elif not isinstance(entry_id, str):
+            raise GameLogValidationError(
+                f"Entry {entry_index}: id must be a string"
+            )
+        normalized["id"] = entry_id
+
+        normalized["timestamp"] = cls._normalize_timestamp(
+            entry.get("timestamp", datetime.now().timestamp()), entry_index
+        )
+
+        normalized["entry_type"] = cls._normalize_enum(
+            EntryType, entry.get("entry_type", EntryType.SIGHTING),
+            "Entry Type",
+            entry_index,
+        )
+
+        normalized["species"] = cls._normalize_enum(
+            GameSpecies, entry.get("species", GameSpecies.WHITETAIL_DEER),
+            "Species",
+            entry_index,
+        )
+
+        count = entry.get("count", 1)
+        if isinstance(count, bool) or not isinstance(count, (int, float)):
+            raise GameLogValidationError(
+                f"Entry {entry_index}: Count must be a whole number"
+            )
+        count = int(count)
+        if count <= 0:
+            raise GameLogValidationError(
+                f"Entry {entry_index}: Count must be positive"
+            )
+        normalized["count"] = count
+
+        normalized["location"] = cls._normalize_location(
+            entry.get("location"), entry_index
+        )
+
+        normalized["weather"] = cls._normalize_weather(
+            entry.get("weather"), entry_index
+        )
+
+        normalized["weight"] = cls._normalize_optional_float(
+            entry.get("weight"), "Weight", entry_index
+        )
+        normalized["antler_points"] = cls._normalize_optional_int(
+            entry.get("antler_points"), "Antler points", entry_index
+        )
+        normalized["weapon"] = entry.get("weapon", "") if isinstance(entry.get("weapon"), str) else ""
+        normalized["ammunition"] = entry.get("ammunition", "") if isinstance(entry.get("ammunition"), str) else ""
+        normalized["shot_distance"] = cls._normalize_optional_float(
+            entry.get("shot_distance"), "Shot distance", entry_index
+        )
+        field_dressed = entry.get("field_dressed", False)
+        normalized["field_dressed"] = (
+            field_dressed
+            if isinstance(field_dressed, bool)
+            else cls._normalize_bool(field_dressed, "Field dressed", entry_index)
+        )
+
+        normalized["notes"] = cls._normalize_notes(entry.get("notes"), entry_index)
+        normalized["photos"] = cls._normalize_photos(entry.get("photos"), entry_index)
+
+        return normalized
+
+    @classmethod
+    def validate_document(cls, document: Any) -> Tuple[int, List[Dict[str, Any]]]:
+        """Validate the persisted document structure and entries."""
+
+        if isinstance(document, list):
+            schema_version = 0
+            entries = document
+        elif isinstance(document, dict):
+            schema_version = document.get("schema_version", 0)
+            entries = document.get("entries", [])
+        else:
+            raise GameLogValidationError("Game log data must be a list or object")
+
+        if schema_version not in cls.SUPPORTED_VERSIONS:
+            raise GameLogValidationError(
+                f"Unsupported schema version: {schema_version}"
+            )
+
+        if not isinstance(entries, list):
+            raise GameLogValidationError("Entries must be provided as a list")
+
+        normalized_entries: List[Dict[str, Any]] = []
+        for index, raw_entry in enumerate(entries):
+            normalized_entries.append(cls._normalize_entry(raw_entry, index))
+
+        return schema_version, normalized_entries
 
 
 
@@ -2556,9 +2904,11 @@ class GameLogModule(BaseModule):
 
         try:
 
-            data = [entry.to_dict() for entry in self.entries]
-
-            
+            document = {
+                "schema_version": GameLogValidator.CURRENT_VERSION,
+                "generated_at": datetime.utcnow().isoformat(timespec="seconds"),
+                "entries": [entry.to_dict() for entry in self.entries],
+            }
 
             # Create backup of existing file
 
@@ -2574,7 +2924,7 @@ class GameLogModule(BaseModule):
 
             with open(self.data_file, 'w', encoding='utf-8') as f:
 
-                json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+                json.dump(document, f, indent=2, ensure_ascii=False, default=str)
 
             
 
@@ -2613,26 +2963,33 @@ class GameLogModule(BaseModule):
             
 
             with open(self.data_file, 'r', encoding='utf-8') as f:
+                raw_data = json.load(f)
 
-                data = json.load(f)
+            try:
+                schema_version, validated_entries = GameLogValidator.validate_document(raw_data)
+            except GameLogValidationError as e:
+                self.log_error("Game log validation failed", exception=e)
+                self.error_occurred.emit(
+                    "Validation Error",
+                    f"Game log file failed validation: {str(e)}",
+                )
+                return
 
-            
+            if schema_version < GameLogValidator.CURRENT_VERSION:
+                self.log_info(
+                    f"Loaded game log with legacy schema version {schema_version}"
+                )
 
             self.entries = []
 
-            for entry_dict in data:
-
+            for entry_dict in validated_entries:
                 try:
-
                     entry = GameEntry.from_dict(entry_dict)
-
                     self.entries.append(entry)
-
                 except Exception as e:
-
-                    self.log_warning(f"Failed to load entry: {e}", entry_data=entry_dict)
-
-            
+                    self.log_warning(
+                        f"Failed to load entry: {e}", entry_data=entry_dict
+                    )
 
             self.log_info(f"Loaded {len(self.entries)} entries from {self.data_file}")
 

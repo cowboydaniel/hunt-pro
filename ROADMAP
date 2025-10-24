@@ -13,7 +13,7 @@ This roadmap is structured as nine progressive phases that build from core stabi
 - [x] Provide containerized development recipes to simplify onboarding for new contributors.
 
 ## Phase 3 – Data Integrity & Persistence
-- Implement robust validation for hunt logs in `game_log.py`, including schema versioning.
+- [x] Implement robust validation for hunt logs in `game_log.py`, including schema versioning.
 - Add automated backups and import/export routines for ballistic profiles in `ballistics.py`.
 - Introduce migration scripts that safely evolve stored data structures across releases.
 
