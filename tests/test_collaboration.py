@@ -6,6 +6,7 @@ from collaboration import (
     CollaborationSession,
     ExpiredToken,
     InvalidToken,
+    PermissionDenied,
     TeammateLocation,
 )
 
@@ -37,6 +38,7 @@ def test_location_updates_and_export_state():
     assert exported["session_id"] == "session-abc"
     assert exported["teammates"][0]["status"] == "Tracking herd"
     assert exported["teammates"][0]["location"]["lat"] == pytest.approx(45.0)
+    assert exported["teammates"][0]["role"] == "guide"
 
 
 def test_event_annotations_capture_context():
@@ -73,4 +75,34 @@ def test_invalid_signature_is_rejected():
     tampered = token.replace(token[-2:], "aa")
     with pytest.raises(InvalidToken):
         session.join(tampered)
+
+
+def test_role_permissions_enforced():
+    session = CollaborationSession(session_id="session-role", secret=b"role")
+    guide_token = session.generate_join_token("Orion", role="guide", expires_in=60)
+    observer_token = session.generate_join_token("Lyra", role="observer", expires_in=60)
+
+    guide_presence = session.join(guide_token)
+    assert guide_presence.role == "guide"
+
+    observer_presence = session.join(observer_token, status="Listening")
+    assert observer_presence.role == "observer"
+    assert observer_presence.status == "Listening"
+
+    location = TeammateLocation(latitude=42.0, longitude=-109.0)
+    session.update_location(guide_token, location)
+    session.record_event(guide_token, category="Call", message="Move to ridge")
+
+    with pytest.raises(PermissionDenied):
+        session.update_location(observer_token, location)
+
+    with pytest.raises(PermissionDenied):
+        session.record_event(observer_token, category="Note", message="Saw elk")
+
+
+def test_unknown_role_rejected():
+    session = CollaborationSession(secret=b"role-check")
+
+    with pytest.raises(ValueError):
+        session.generate_join_token("Vega", role="commander")
 

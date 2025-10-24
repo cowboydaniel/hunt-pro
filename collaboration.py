@@ -27,7 +27,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Set
 
 
 class SessionSecurityError(RuntimeError):
@@ -40,6 +40,10 @@ class InvalidToken(SessionSecurityError):
 
 class ExpiredToken(SessionSecurityError):
     """Raised when a token is presented after its expiry window."""
+
+
+class PermissionDenied(SessionSecurityError):
+    """Raised when a teammate attempts an action beyond their role."""
 
 
 class UnknownTeammateError(KeyError):
@@ -85,6 +89,7 @@ class TeammatePresence:
     last_seen: float = field(default_factory=lambda: time.time())
     status: Optional[str] = None
     location: Optional[TeammateLocation] = None
+    role: str = "guide"
 
     def to_payload(self) -> Dict[str, object]:
         """Return a serialisable representation of the presence."""
@@ -97,6 +102,7 @@ class TeammatePresence:
             payload["status"] = self.status
         if self.location:
             payload["location"] = self.location.to_payload()
+        payload["role"] = self.role
         return payload
 
 
@@ -130,6 +136,12 @@ class CollaborationSession:
     """Manage a secure collaborative hunt session."""
 
     TOKEN_VERSION = "1"
+    DEFAULT_ROLE = "guide"
+    VALID_ROLES: Set[str] = {"guide", "observer"}
+    ROLE_PERMISSIONS = {
+        "guide": {"update_location", "record_event"},
+        "observer": set(),
+    }
 
     def __init__(
         self,
@@ -147,7 +159,13 @@ class CollaborationSession:
     # ------------------------------------------------------------------
     # Token handling
     # ------------------------------------------------------------------
-    def generate_join_token(self, call_sign: str, *, expires_in: int = 300) -> str:
+    def generate_join_token(
+        self,
+        call_sign: str,
+        *,
+        expires_in: int = 300,
+        role: str = DEFAULT_ROLE,
+    ) -> str:
         """Create a signed invitation token for a teammate.
 
         Parameters
@@ -156,16 +174,23 @@ class CollaborationSession:
             Unique identifier of the teammate being invited.
         expires_in:
             Lifetime of the token in seconds (default five minutes).
+        role:
+            Permission tier granted to the teammate. ``"guide"`` (default)
+            can coordinate the hunt while ``"observer"`` has read-only
+            access to session telemetry.
         """
 
         if expires_in <= 0:
             raise ValueError("expires_in must be positive")
+        if role not in self.VALID_ROLES:
+            raise ValueError(f"Unknown role '{role}'. Valid roles: {sorted(self.VALID_ROLES)}")
         expiry = int(time.time() + expires_in)
         payload = {
             "v": self.TOKEN_VERSION,
             "sid": self.session_id,
             "cs": call_sign,
             "exp": expiry,
+            "role": role,
         }
         payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
         signature = hmac.new(self._secret, payload_bytes, hashlib.sha256).digest()
@@ -199,14 +224,25 @@ class CollaborationSession:
             raise InvalidToken("Token expiry is unreasonably far in the future")
         return data
 
-    def _authorise(self, token: str) -> TeammatePresence:
+    def _authorise(self, token: str, *, permission: Optional[str] = None) -> TeammatePresence:
         payload = self._decode_token(token)
         call_sign = str(payload.get("cs"))
+        role = str(payload.get("role", self.DEFAULT_ROLE))
+        if role not in self.VALID_ROLES:
+            raise InvalidToken("Token specifies an unknown role")
         presence = self._teammates.get(call_sign)
         if presence is None:
-            presence = TeammatePresence(call_sign=call_sign)
+            presence = TeammatePresence(call_sign=call_sign, role=role)
             self._teammates[call_sign] = presence
+        else:
+            presence.role = role
         presence.last_seen = time.time()
+        if permission is not None:
+            allowed = self.ROLE_PERMISSIONS.get(presence.role, set())
+            if permission not in allowed:
+                raise PermissionDenied(
+                    f"Role '{presence.role}' is not permitted to perform '{permission}'"
+                )
         return presence
 
     # ------------------------------------------------------------------
@@ -229,7 +265,7 @@ class CollaborationSession:
     ) -> TeammatePresence:
         """Update the location for an authorised teammate."""
 
-        presence = self._authorise(token)
+        presence = self._authorise(token, permission="update_location")
         presence.location = location
         if status is not None:
             presence.status = status
@@ -245,7 +281,7 @@ class CollaborationSession:
     ) -> EventAnnotation:
         """Record a new event annotation from a teammate."""
 
-        presence = self._authorise(token)
+        presence = self._authorise(token, permission="record_event")
         event = EventAnnotation(
             author=presence.call_sign,
             category=category,
