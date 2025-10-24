@@ -609,6 +609,13 @@ class ModuleManager(QObject):
         self.logger = get_logger()
         # Available modules with metadata
         self.available_modules = {
+            'sensor_diagnostics': {
+                'path': 'sensor_diagnostics_module.SensorDiagnosticsModule',
+                'display_name': '🛰️ Sensors',
+                'description': 'Real-time diagnostics and calibration workflows for paired devices',
+                'icon': '🛰️',
+                'priority': 0
+            },
             'ballistics': {
                 'path': 'ballistics.BallisticsModule',
                 'display_name': 'ðŸŽ¯ Ballistics',
