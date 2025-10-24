@@ -22,13 +22,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from device_manager import DeviceIdentity, DeviceManager, DeviceType, PairedDevice
+from device_manager import DeviceManager, DeviceType, PairedDevice
 from logger import get_logger
 from main import BaseModule
 from sensor_diagnostics import (
     SensorDiagnosticSnapshot,
     SensorDiagnosticsEngine,
 )
+from simulated_devices import ensure_simulated_diagnostics_devices
 
 
 class SensorDiagnosticsModule(BaseModule):
@@ -148,58 +149,8 @@ class SensorDiagnosticsModule(BaseModule):
 
     # ---------------------------------------------------------------- Diagnostics
     def _bootstrap_simulated_devices(self) -> None:
-        if self.device_manager.get_paired_devices():
-            return
         self.logger.info("Bootstrapping simulated hardware for diagnostics module")
-        self.device_manager.pair_bluetooth_device(
-            DeviceType.RANGEFINDER,
-            identity=DeviceIdentity(
-                manufacturer="HuntPro",
-                model="XR-1200",
-                serial_number="SIM-RNG-001",
-                firmware="1.2.3",
-            ),
-            address="00:11:22:33:44:55",
-            services=["huntpro.rangefinder"],
-            rssi=-68,
-            metadata={"max_range": 1200, "calibration": "factory", "simulated": True},
-        )
-        self.device_manager.pair_bluetooth_device(
-            DeviceType.WEATHER_METER,
-            identity=DeviceIdentity(
-                manufacturer="SkyWise",
-                model="WX-Pro",
-                serial_number="SIM-WTH-002",
-                firmware="4.1.0",
-            ),
-            address="00:11:22:33:44:66",
-            services=["huntpro.weather"],
-            rssi=-72,
-            metadata={
-                "sensors": ["temperature", "humidity", "wind_speed", "wind_direction"],
-                "calibration": "factory",
-                "simulated": True,
-            },
-        )
-        self.device_manager.pair_bluetooth_device(
-            DeviceType.SHOT_TIMER,
-            identity=DeviceIdentity(
-                manufacturer="ShotSense",
-                model="Echo",
-                serial_number="SIM-SHT-003",
-                firmware="2.0.1",
-            ),
-            address="00:11:22:33:44:77",
-            services=["huntpro.shot_timer"],
-            rssi=-75,
-            metadata={
-                "min_split_ms": 60,
-                "sensitivity_db": 85,
-                "supports_strings": True,
-                "calibration": "factory",
-                "simulated": True,
-            },
-        )
+        ensure_simulated_diagnostics_devices(self.device_manager)
 
     def _populate_device_list(self) -> None:
         self.device_list.clear()
