@@ -3,7 +3,10 @@ import sys
 import types
 from datetime import datetime
 from pathlib import Path
+
 import pytest
+
+
 def _install_qt_stubs() -> None:
     if "PySide6" in sys.modules:
         return
