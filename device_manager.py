@@ -16,7 +16,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Iterable, List, MutableMapping, Optional, Protocol, Set
+from typing import (
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    MutableMapping,
+    Optional,
+    Protocol,
+    Set,
+    Union,
+)
+
+try:
+    from importlib import metadata
+except ImportError:  # pragma: no cover - Python <3.8 fallback
+    metadata = None  # type: ignore[assignment]
 
 from logger import LoggableMixin
 
@@ -139,6 +154,23 @@ class DeviceAdapter(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class AdapterContribution:
+    """Describes an adapter contribution that may replace an existing adapter."""
+
+    adapter: DeviceAdapter
+    replace_existing: bool = False
+
+
+class DeviceAdapterPlugin(Protocol):
+    """Protocol that third-party adapter plug-ins must satisfy."""
+
+    api_version: str
+
+    def create_adapters(self) -> Iterable[Union[DeviceAdapter, AdapterContribution]]:
+        ...
+
+
 class BluetoothDeviceAdapter(LoggableMixin):
     """Base class providing helpers for Bluetooth-centric adapters."""
 
@@ -255,25 +287,112 @@ class ShotTimerAdapter(BluetoothDeviceAdapter):
 class DeviceManager(LoggableMixin):
     """Manages the lifecycle of Hunt Pro hardware devices."""
 
-    def __init__(self):
+    DEFAULT_PLUGIN_GROUP = "hunt_pro.device_adapters"
+    PLUGIN_API_VERSION = "1.0"
+
+    def __init__(self, *, auto_load_plugins: bool = True):
         super().__init__()
         self._adapters: MutableMapping[DeviceType, DeviceAdapter] = {}
         self._paired_devices: MutableMapping[str, PairedDevice] = {}
         self._register_default_adapters()
+        if auto_load_plugins:
+            self.load_adapter_plugins()
 
     def _register_default_adapters(self) -> None:
         self.register_adapter(RangefinderAdapter())
         self.register_adapter(WeatherMeterAdapter())
         self.register_adapter(ShotTimerAdapter())
 
-    def register_adapter(self, adapter: DeviceAdapter) -> None:
-        if adapter.device_type in self._adapters:
+    def register_adapter(self, adapter: DeviceAdapter, *, replace: bool = False) -> None:
+        if adapter.device_type in self._adapters and not replace:
             raise ValueError(f"Adapter already registered for {adapter.device_type.value}")
+        if replace and adapter.device_type in self._adapters:
+            self.log_info(
+                "Replacing adapter via plug-in",
+                device_type=adapter.device_type.value,
+                previous_adapter=self._adapters[adapter.device_type].__class__.__name__,
+                new_adapter=adapter.__class__.__name__,
+            )
         self._adapters[adapter.device_type] = adapter
         self.log_info(
             f"Registered adapter for {adapter.device_type.value}",
             device_type=adapter.device_type.value,
         )
+
+    def load_adapter_plugins(self, *, group: Optional[str] = None) -> int:
+        """Discover and register plug-in adapters exposed via entry points."""
+
+        if metadata is None:
+            self.log_warning(
+                "importlib.metadata unavailable; skipping adapter plug-in discovery",
+                group=group or self.DEFAULT_PLUGIN_GROUP,
+            )
+            return 0
+
+        entry_points = self._discover_entry_points(group)
+        registered = 0
+        for entry_point in entry_points:
+            try:
+                plugin = entry_point.load()
+                plugin = self._coerce_plugin(plugin)
+                if str(plugin.api_version) != self.PLUGIN_API_VERSION:
+                    self.log_warning(
+                        "Skipping plug-in with incompatible API version",
+                        plugin=entry_point.name,
+                        plugin_api=str(plugin.api_version),
+                        expected_api=self.PLUGIN_API_VERSION,
+                    )
+                    continue
+                for contribution in self._iter_contributions(plugin.create_adapters()):
+                    self.register_adapter(
+                        contribution.adapter,
+                        replace=contribution.replace_existing,
+                    )
+                    registered += 1
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self.log_error(
+                    "Failed to load adapter plug-in",
+                    exception=exc,
+                    plugin=getattr(entry_point, "name", "<unknown>"),
+                )
+        return registered
+
+    def _discover_entry_points(self, group: Optional[str]) -> Iterable[object]:
+        entry_point_group = group or self.DEFAULT_PLUGIN_GROUP
+        try:
+            eps = metadata.entry_points()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.log_error(
+                "Unable to query adapter plug-in entry points",
+                exception=exc,
+                group=entry_point_group,
+            )
+            return []
+        if hasattr(eps, "select"):
+            return eps.select(group=entry_point_group)
+        return eps.get(entry_point_group, [])  # type: ignore[return-value]
+
+    def _coerce_plugin(self, plugin_obj: object) -> DeviceAdapterPlugin:
+        if callable(plugin_obj) and not hasattr(plugin_obj, "create_adapters"):
+            plugin_obj = plugin_obj()
+        if not hasattr(plugin_obj, "create_adapters"):
+            raise TypeError("Adapter plug-in must define a create_adapters method")
+        if not hasattr(plugin_obj, "api_version"):
+            raise TypeError("Adapter plug-in must expose an api_version attribute")
+        return plugin_obj  # type: ignore[return-value]
+
+    def _iter_contributions(
+        self, raw: Iterable[Union[DeviceAdapter, AdapterContribution]]
+    ) -> Iterator[AdapterContribution]:
+        for item in raw:
+            if isinstance(item, AdapterContribution):
+                yield item
+            elif hasattr(item, "pair") and hasattr(item, "device_type"):
+                yield AdapterContribution(adapter=item)  # type: ignore[arg-type]
+            else:
+                raise TypeError(
+                    "Adapter plug-in contributions must be DeviceAdapter or AdapterContribution"
+                )
 
     def pair_bluetooth_device(
         self,
@@ -331,10 +450,16 @@ class DeviceManager(LoggableMixin):
 
 
 __all__ = [
+    "AdapterContribution",
+    "BluetoothDeviceAdapter",
     "DeviceCapability",
     "DeviceIdentity",
     "DeviceManager",
     "DevicePairingError",
+    "DeviceAdapterPlugin",
     "DeviceType",
     "PairedDevice",
+    "RangefinderAdapter",
+    "ShotTimerAdapter",
+    "WeatherMeterAdapter",
 ]
