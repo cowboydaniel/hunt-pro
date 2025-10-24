@@ -22,7 +22,7 @@ This roadmap is structured as nine progressive phases that build from core stabi
 - [x] Improve GPS abstraction to accept simulated feeds for training scenarios.
 ## Phase 6 – Sensor & Device Integrations
 - [x] Expand the modular device manager to pair Bluetooth rangefinders, weather meters, and shot timers.
-- Create a plug-in protocol so third-party hardware vendors can contribute adapters.
+- [x] Create a plug-in protocol so third-party hardware vendors can contribute adapters.
 - Surface real-time sensor diagnostics and calibration workflows within the UI.
 ## Phase 7 – Collaboration & Data Sharing
 - Implement secure session sharing with real-time teammate locations and event annotations.
