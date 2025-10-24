@@ -6,8 +6,8 @@ for hunting and outdoor activities.
 import json
 import math
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, NamedTuple
-from dataclasses import dataclass, asdict
+from typing import List, Dict, Optional, Tuple, NamedTuple, Any
+from dataclasses import dataclass, field, asdict
 from enum import Enum, auto
 from datetime import datetime
 import uuid
@@ -22,7 +22,7 @@ from PySide6.QtCore import (
     Qt, Signal, QTimer, QThread, QObject, QSettings, QPointF
 )
 from PySide6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QPixmap
-from PySide6.QtCharts import QChart, QChartView, QScatterSeries
+from PySide6.QtCharts import QChart, QChartView, QScatterSeries, QLineSeries
 from main import BaseModule
 from logger import get_logger, LoggableMixin
 from map_tile_cache import CachedTile, MapTileCache, TileSource
@@ -45,6 +45,26 @@ class NavigationMode(Enum):
     MAP = "Map"
     SATELLITE = "Satellite"
     TERRAIN = "Terrain"
+
+
+class TerrainOverlayType(Enum):
+    """Supported terrain overlay modes for the navigation map."""
+
+    NONE = "None"
+    VEGETATION = "Vegetation Density"
+    WATER = "Water Saturation"
+    SLOPE = "Slope Exposure"
+
+
+class POICategory(Enum):
+    """Categories for points of interest rendered on the map."""
+
+    WATER = "Water"
+    FEED = "Feeding Area"
+    SIGN = "Fresh Sign"
+    ACCESS = "Access Point"
+    CAMP = "Camp"
+    OTHER = "Other"
 @dataclass
 class GPSCoordinate:
     """GPS coordinate with precision and metadata."""
@@ -130,6 +150,28 @@ class Waypoint:
         if self.last_visited:
             return datetime.fromtimestamp(self.last_visited)
         return None
+
+
+@dataclass
+class PointOfInterest:
+    """Tagged point-of-interest rendered on the navigation map."""
+
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = ""
+    category: POICategory = POICategory.OTHER
+    coordinate: GPSCoordinate = None
+    notes: str = ""
+    created_at: float = field(default_factory=lambda: datetime.now().timestamp())
+
+    def __post_init__(self):
+        if self.coordinate is None:
+            self.coordinate = GPSCoordinate(0.0, 0.0)
+
+    @property
+    def created_datetime(self) -> datetime:
+        """Return the created timestamp as a datetime instance."""
+
+        return datetime.fromtimestamp(self.created_at)
 @dataclass
 class TrackPoint:
     """Single point in a GPS track."""
@@ -301,11 +343,15 @@ class NavigationModule(BaseModule):
         self.current_track: Optional[GPSTrack] = None
         self.is_tracking = False
         self.tile_cache = MapTileCache()
+        self.points_of_interest: List[PointOfInterest] = []
+        self.active_terrain_overlay: TerrainOverlayType = TerrainOverlayType.NONE
+        self.show_elevation_contours = False
         # Data files
         self.data_dir = Path.home() / "HuntPro" / "navigation"
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.waypoints_file = self.data_dir / "waypoints.json"
         self.tracks_file = self.data_dir / "tracks.json"
+        self.pois_file = self.data_dir / "points_of_interest.json"
         self.setup_ui()
         self.load_data()
         # Connect GPS signals
@@ -502,6 +548,25 @@ class NavigationModule(BaseModule):
         self.center_on_position_btn.clicked.connect(self.center_map_on_position)
         controls_layout.addWidget(self.center_on_position_btn)
         layout.addLayout(controls_layout)
+        overlay_group = QGroupBox("ðŸ—ºï¸ Terrain Overlays")
+        overlay_layout = QGridLayout()
+        overlay_layout.addWidget(QLabel("Overlay:"), 0, 0)
+        self.overlay_combo = QComboBox()
+        for overlay in TerrainOverlayType:
+            self.overlay_combo.addItem(overlay.value, overlay)
+        self.overlay_combo.currentIndexChanged.connect(self.on_overlay_changed)
+        overlay_layout.addWidget(self.overlay_combo, 0, 1)
+        overlay_layout.addWidget(QLabel("Intensity:"), 1, 0)
+        self.overlay_opacity_slider = QSlider(Qt.Horizontal)
+        self.overlay_opacity_slider.setRange(10, 100)
+        self.overlay_opacity_slider.setValue(70)
+        self.overlay_opacity_slider.valueChanged.connect(lambda _: self.update_map_display())
+        overlay_layout.addWidget(self.overlay_opacity_slider, 1, 1)
+        self.show_contours_checkbox = QCheckBox("Show elevation contours")
+        self.show_contours_checkbox.stateChanged.connect(self.on_contours_toggled)
+        overlay_layout.addWidget(self.show_contours_checkbox, 2, 0, 1, 2)
+        overlay_group.setLayout(overlay_layout)
+        layout.addWidget(overlay_group)
         # Map view (placeholder - in a real implementation this would be a proper map widget)
         self.map_chart_view = QChartView()
         self.map_chart_view.setMinimumHeight(400)
@@ -509,6 +574,54 @@ class NavigationModule(BaseModule):
         self.map_status_label = QLabel("Map tiles will be cached for offline use once loaded.")
         self.map_status_label.setObjectName("statusLabel")
         layout.addWidget(self.map_status_label)
+        poi_group = QGroupBox("ðŸ“ Points of Interest")
+        poi_layout = QVBoxLayout()
+        poi_form_layout = QFormLayout()
+        self.poi_name_edit = QLineEdit()
+        self.poi_name_edit.setPlaceholderText("Enter POI name")
+        poi_form_layout.addRow("Name:", self.poi_name_edit)
+        self.poi_category_combo = QComboBox()
+        for category in POICategory:
+            self.poi_category_combo.addItem(category.value, category)
+        poi_form_layout.addRow("Category:", self.poi_category_combo)
+        poi_coord_layout = QHBoxLayout()
+        self.poi_lat_spin = QDoubleSpinBox()
+        self.poi_lat_spin.setRange(-90, 90)
+        self.poi_lat_spin.setDecimals(6)
+        poi_coord_layout.addWidget(QLabel("Lat:"))
+        poi_coord_layout.addWidget(self.poi_lat_spin)
+        self.poi_lon_spin = QDoubleSpinBox()
+        self.poi_lon_spin.setRange(-180, 180)
+        self.poi_lon_spin.setDecimals(6)
+        poi_coord_layout.addWidget(QLabel("Lon:"))
+        poi_coord_layout.addWidget(self.poi_lon_spin)
+        poi_form_layout.addRow("Coordinates:", poi_coord_layout)
+        self.poi_notes_edit = QLineEdit()
+        self.poi_notes_edit.setPlaceholderText("Optional notes or instructions")
+        poi_form_layout.addRow("Notes:", self.poi_notes_edit)
+        poi_buttons_layout = QHBoxLayout()
+        self.poi_use_current_btn = QPushButton("ðŸ“ Use Current Position")
+        self.poi_use_current_btn.clicked.connect(self.use_current_position_for_poi)
+        poi_buttons_layout.addWidget(self.poi_use_current_btn)
+        self.add_poi_btn = QPushButton("âœ… Add Point of Interest")
+        self.add_poi_btn.setObjectName("primary")
+        self.add_poi_btn.clicked.connect(self.add_point_of_interest)
+        poi_buttons_layout.addWidget(self.add_poi_btn)
+        poi_form_layout.addRow(poi_buttons_layout)
+        poi_layout.addLayout(poi_form_layout)
+        self.poi_table = QTableWidget()
+        poi_headers = ["Name", "Category", "Coordinates", "Created", "Notes"]
+        self.poi_table.setColumnCount(len(poi_headers))
+        self.poi_table.setHorizontalHeaderLabels(poi_headers)
+        poi_header = self.poi_table.horizontalHeader()
+        poi_header.setSectionResizeMode(0, QHeaderView.Stretch)
+        poi_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        poi_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        poi_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        poi_header.setSectionResizeMode(4, QHeaderView.Stretch)
+        poi_layout.addWidget(self.poi_table)
+        poi_group.setLayout(poi_layout)
+        layout.addWidget(poi_group)
         return tab
     def apply_styling(self):
         """Apply styling to the navigation module."""
@@ -755,11 +868,81 @@ class NavigationModule(BaseModule):
                 if col < 5:  # Don't set alignment for actions column
                     item.setTextAlignment(Qt.AlignCenter)
                 self.tracks_table.setItem(row, col, item)
+    def update_poi_table(self):
+        """Render the points-of-interest table."""
+
+        self.poi_table.setRowCount(len(self.points_of_interest))
+        for row, poi in enumerate(self.points_of_interest):
+            items = [
+                QTableWidgetItem(poi.name),
+                QTableWidgetItem(poi.category.value),
+                QTableWidgetItem(f"{poi.coordinate.latitude:.6f}, {poi.coordinate.longitude:.6f}"),
+                QTableWidgetItem(poi.created_datetime.strftime("%Y-%m-%d %H:%M")),
+                QTableWidgetItem(poi.notes or "--"),
+            ]
+            for col, item in enumerate(items):
+                if col in (1, 3):
+                    item.setTextAlignment(Qt.AlignCenter)
+                self.poi_table.setItem(row, col, item)
     def update_waypoint_combo(self):
         """Update the target waypoint combo box."""
         self.target_waypoint_combo.clear()
         for waypoint in self.waypoints:
             self.target_waypoint_combo.addItem(f"{waypoint.name} ({waypoint.waypoint_type.value})", waypoint)
+    def on_overlay_changed(self):
+        """Handle terrain overlay selection changes."""
+
+        overlay = self.overlay_combo.currentData()
+        if isinstance(overlay, TerrainOverlayType):
+            self.active_terrain_overlay = overlay
+        else:
+            self.active_terrain_overlay = TerrainOverlayType.NONE
+        self.update_map_display()
+    def on_contours_toggled(self, state: int):
+        """Toggle elevation contour visibility."""
+
+        self.show_elevation_contours = state == Qt.Checked
+        self.update_map_display()
+    def use_current_position_for_poi(self):
+        """Populate POI fields using the current GPS position."""
+
+        if not self.current_position:
+            QMessageBox.information(self, "No Position", "No current GPS position available.")
+            return
+        self.poi_lat_spin.setValue(self.current_position.latitude)
+        self.poi_lon_spin.setValue(self.current_position.longitude)
+    def add_point_of_interest(self):
+        """Create a new point-of-interest entry."""
+
+        try:
+            name = self.poi_name_edit.text().strip()
+            if not name:
+                QMessageBox.warning(self, "Missing Information", "Please provide a name for the point of interest.")
+                return
+            category = self.poi_category_combo.currentData()
+            if not isinstance(category, POICategory):
+                category = POICategory.OTHER
+            coordinate = GPSCoordinate(
+                latitude=self.poi_lat_spin.value(),
+                longitude=self.poi_lon_spin.value(),
+            )
+            poi = PointOfInterest(
+                name=name,
+                category=category,
+                coordinate=coordinate,
+                notes=self.poi_notes_edit.text().strip(),
+            )
+            self.points_of_interest.append(poi)
+            self.save_points_of_interest()
+            self.update_poi_table()
+            self.update_map_display()
+            self.poi_name_edit.clear()
+            self.poi_notes_edit.clear()
+            self.status_message.emit(f"Added point of interest: {name}")
+            self.log_user_action("poi_added", {"poi_name": name, "category": category.value})
+        except Exception as e:
+            self.log_error("Failed to add point of interest", exception=e)
+            self.error_occurred.emit("POI Error", f"Failed to add point of interest: {str(e)}")
     def center_map_on_position(self):
         """Center map on current position and fetch a tile."""
         if not self.current_position:
@@ -778,7 +961,8 @@ class NavigationModule(BaseModule):
         self.status_message.emit("Map centered on current position")
 
     def update_map_display(self, tile: Optional[CachedTile] = None):
-        """Update the map display with waypoints, tracks, and cached tiles."""
+        """Update the map display with waypoints, overlays, tracks, and cached tiles."""
+
         try:
             chart = QChart()
             chart.setTitle("Navigation Map")
@@ -786,6 +970,7 @@ class NavigationModule(BaseModule):
             waypoint_series = QScatterSeries()
             waypoint_series.setName("Waypoints")
             waypoint_series.setMarkerSize(10)
+            waypoint_series.setColor(QColor("#2c5aa0"))
             for waypoint in self.waypoints:
                 waypoint_series.append(waypoint.coordinate.longitude, waypoint.coordinate.latitude)
             chart.addSeries(waypoint_series)
@@ -797,9 +982,42 @@ class NavigationModule(BaseModule):
                 position_series.setColor(QColor("#dc3545"))
                 position_series.append(self.current_position.longitude, self.current_position.latitude)
                 chart.addSeries(position_series)
+            # Add points of interest grouped by category for unique styling
+            if self.points_of_interest:
+                poi_series_map: Dict[POICategory, QScatterSeries] = {}
+                for poi in self.points_of_interest:
+                    series = poi_series_map.get(poi.category)
+                    if not series:
+                        series = QScatterSeries()
+                        series.setName(f"POI - {poi.category.value}")
+                        series.setMarkerSize(12)
+                        color = self._category_color(poi.category)
+                        color.setAlpha(220)
+                        series.setColor(color)
+                        poi_series_map[poi.category] = series
+                        chart.addSeries(series)
+                    series.append(poi.coordinate.longitude, poi.coordinate.latitude)
             chart.createDefaultAxes()
-            chart.axes(Qt.Horizontal)[0].setTitleText("Longitude")
-            chart.axes(Qt.Vertical)[0].setTitleText("Latitude")
+            x_axis = chart.axes(Qt.Horizontal)[0]
+            y_axis = chart.axes(Qt.Vertical)[0]
+            x_axis.setTitleText("Longitude")
+            y_axis.setTitleText("Latitude")
+            # Attach all series to axes (required after createDefaultAxes)
+            for series in chart.series():
+                series.attachAxis(x_axis)
+                series.attachAxis(y_axis)
+            # Render requested terrain overlay
+            center = self.current_position or (self.waypoints[0].coordinate if self.waypoints else None)
+            if center:
+                for overlay_series in self._create_overlay_series(center):
+                    chart.addSeries(overlay_series)
+                    overlay_series.attachAxis(x_axis)
+                    overlay_series.attachAxis(y_axis)
+                if self.show_elevation_contours:
+                    for contour_series in self._generate_elevation_contours(center):
+                        chart.addSeries(contour_series)
+                        contour_series.attachAxis(x_axis)
+                        contour_series.attachAxis(y_axis)
             if tile:
                 pixmap = QPixmap(str(tile.path))
                 if not pixmap.isNull():
@@ -816,6 +1034,93 @@ class NavigationModule(BaseModule):
             self.map_chart_view.setChart(chart)
         except Exception as e:
             self.log_error("Failed to update map display", exception=e)
+    def _category_color(self, category: POICategory) -> QColor:
+        """Return a distinctive color for a POI category."""
+
+        palette = {
+            POICategory.WATER: QColor("#1e88e5"),
+            POICategory.FEED: QColor("#43a047"),
+            POICategory.SIGN: QColor("#fdd835"),
+            POICategory.ACCESS: QColor("#8e24aa"),
+            POICategory.CAMP: QColor("#fb8c00"),
+            POICategory.OTHER: QColor("#546e7a"),
+        }
+        return palette.get(category, QColor("#546e7a"))
+    def _create_overlay_series(self, center: GPSCoordinate) -> List[QScatterSeries]:
+        """Generate scatter series for the active terrain overlay."""
+
+        if self.active_terrain_overlay == TerrainOverlayType.NONE:
+            return []
+        intensity = self.overlay_opacity_slider.value() if hasattr(self, "overlay_opacity_slider") else 70
+        alpha = min(255, max(30, int(255 * (intensity / 100))))
+        grid_offsets = [-0.02, -0.01, 0.0, 0.01, 0.02]
+        buckets: Dict[str, QScatterSeries] = {}
+        bucket_colors = {
+            "Low": QColor("#81c784"),
+            "Medium": QColor("#43a047"),
+            "High": QColor("#1b5e20"),
+        }
+        if self.active_terrain_overlay == TerrainOverlayType.WATER:
+            bucket_colors = {
+                "Low": QColor("#bbdefb"),
+                "Medium": QColor("#64b5f6"),
+                "High": QColor("#1e88e5"),
+            }
+        elif self.active_terrain_overlay == TerrainOverlayType.SLOPE:
+            bucket_colors = {
+                "Low": QColor("#ffe082"),
+                "Medium": QColor("#ffb300"),
+                "High": QColor("#f57c00"),
+            }
+        for level, color in bucket_colors.items():
+            color.setAlpha(alpha)
+            series = QScatterSeries()
+            series.setName(f"{self.active_terrain_overlay.value} - {level}")
+            series.setMarkerSize(18 if level == "High" else 14 if level == "Medium" else 10)
+            series.setColor(color)
+            buckets[level] = series
+        for lat_offset in grid_offsets:
+            for lon_offset in grid_offsets:
+                lat = center.latitude + lat_offset
+                lon = center.longitude + lon_offset
+                metric = self._overlay_metric(lat, lon)
+                if metric < 0.33:
+                    bucket = "Low"
+                elif metric < 0.66:
+                    bucket = "Medium"
+                else:
+                    bucket = "High"
+                buckets[bucket].append(lon, lat)
+        return list(buckets.values())
+    def _overlay_metric(self, lat: float, lon: float) -> float:
+        """Produce a deterministic metric for overlay classification."""
+
+        if self.active_terrain_overlay == TerrainOverlayType.VEGETATION:
+            return (math.sin(lat * 10) + 1) / 2
+        if self.active_terrain_overlay == TerrainOverlayType.WATER:
+            return (math.cos(lon * 10) + 1) / 2
+        if self.active_terrain_overlay == TerrainOverlayType.SLOPE:
+            return abs(math.sin((lat + lon) * 5))
+        return 0.0
+    def _generate_elevation_contours(self, center: GPSCoordinate) -> List[QLineSeries]:
+        """Generate concentric contour lines around the provided center coordinate."""
+
+        contours: List[QLineSeries] = []
+        radii = [0.005, 0.01, 0.015]
+        base_colors = [QColor("#795548"), QColor("#5d4037"), QColor("#3e2723")]
+        for radius, color in zip(radii, base_colors):
+            series = QLineSeries()
+            series.setName(f"Elevation {int(radius * 1000)}m")
+            pen = QPen(color, 2)
+            pen.setStyle(Qt.DotLine)
+            series.setPen(pen)
+            for degree in range(0, 361, 5):
+                rad = math.radians(degree)
+                lat = center.latitude + radius * math.cos(rad)
+                lon = center.longitude + radius * math.sin(rad)
+                series.append(lon, lat)
+            contours.append(series)
+        return contours
     def save_waypoints(self):
         """Save waypoints to file."""
         try:
@@ -830,6 +1135,22 @@ class NavigationModule(BaseModule):
             self.log_debug(f"Saved {len(self.waypoints)} waypoints")
         except Exception as e:
             self.log_error("Failed to save waypoints", exception=e)
+            raise
+    def save_points_of_interest(self):
+        """Persist points-of-interest to disk."""
+
+        try:
+            data = []
+            for poi in self.points_of_interest:
+                poi_dict = asdict(poi)
+                poi_dict["category"] = poi.category.value
+                poi_dict["coordinate"] = asdict(poi.coordinate)
+                data.append(poi_dict)
+            with open(self.pois_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+            self.log_debug(f"Saved {len(self.points_of_interest)} points of interest")
+        except Exception as e:
+            self.log_error("Failed to save points of interest", exception=e)
             raise
     def load_waypoints(self):
         """Load waypoints from file."""
@@ -853,6 +1174,27 @@ class NavigationModule(BaseModule):
             self.log_info(f"Loaded {len(self.waypoints)} waypoints")
         except Exception as e:
             self.log_error("Failed to load waypoints", exception=e)
+    def load_points_of_interest(self):
+        """Load points-of-interest from disk."""
+
+        try:
+            if not self.pois_file.exists():
+                return
+            with open(self.pois_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.points_of_interest = []
+            for poi_dict in data:
+                try:
+                    poi_dict["category"] = POICategory(poi_dict["category"])
+                    coord_dict = poi_dict["coordinate"]
+                    poi_dict["coordinate"] = GPSCoordinate(**coord_dict)
+                    poi = PointOfInterest(**poi_dict)
+                    self.points_of_interest.append(poi)
+                except Exception as e:
+                    self.log_warning(f"Failed to load point of interest: {e}", poi_data=poi_dict)
+            self.log_info(f"Loaded {len(self.points_of_interest)} points of interest")
+        except Exception as e:
+            self.log_error("Failed to load points of interest", exception=e)
     def save_tracks(self):
         """Save tracks to file."""
         try:
@@ -907,10 +1249,12 @@ class NavigationModule(BaseModule):
         """Load all navigation data."""
         self.load_waypoints()
         self.load_tracks()
+        self.load_points_of_interest()
         # Update UI
         QTimer.singleShot(100, self.update_waypoints_display)
         QTimer.singleShot(100, self.update_tracks_display)
         QTimer.singleShot(100, self.update_waypoint_combo)
+        QTimer.singleShot(100, self.update_poi_table)
         QTimer.singleShot(100, self.update_map_display)
     def export_gpx(self, file_path: str, include_waypoints: bool = True, include_tracks: bool = True):
         """Export data to GPX format."""
@@ -995,6 +1339,7 @@ class NavigationModule(BaseModule):
         try:
             self.save_waypoints()
             self.save_tracks()
+            self.save_points_of_interest()
         except Exception as e:
             self.log_error("Failed to save navigation data during cleanup", exception=e)
         super().cleanup()
