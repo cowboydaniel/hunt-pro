@@ -15,6 +15,15 @@ exclude = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+exclude = [
+    "build",
+    "dist",
+    "docs/_build",
+    "venv",
+    ".venv",
+]
+
+[tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
     "F",  # pyflakes
@@ -24,13 +33,6 @@ select = [
 ignore = [
     "E203",  # handled by black
     "E266",  # allow dense module docstrings
-]
-exclude = [
-    "build",
-    "dist",
-    "docs/_build",
-    "venv",
-    ".venv",
 ]
 [tool.ruff.lint.isort]
 known-first-party = [

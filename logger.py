@@ -114,6 +114,7 @@ class HuntProLogger:
             field_log_file, maxBytes=5*1024*1024, backupCount=3
         )
         self.field_handler.setLevel(logging.INFO)
+        field_formatter = StructuredFormatter(include_json=True)
         self.field_handler.setFormatter(field_formatter)
         # Error handler (separate file for errors and critical issues)
         error_log_file = self.log_dir / f"{self.name}_errors.log"
@@ -121,7 +122,7 @@ class HuntProLogger:
             error_log_file, maxBytes=5*1024*1024, backupCount=5
         )
         error_handler.setLevel(logging.ERROR)
-        error_handler.setFormatter(field_formatter)
+        error_handler.setFormatter(StructuredFormatter(include_json=True))
         self.logger.addHandler(error_handler)
     def _log(self, level: int, message: str, category: Optional[LogCategory] = None, 
              exception: Optional[Exception] = None, **kwargs):
