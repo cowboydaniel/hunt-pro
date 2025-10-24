@@ -26,7 +26,7 @@ def _build_result() -> tuple:
     calculator = BallisticsCalculator()
     # BallisticsCalculator relies on the application logger for additional
     # telemetry hooks that are not required for these unit tests.
-    setattr(calculator, "log_ballistics_calculation", lambda *_, **__: None)
+    calculator.log_ballistics_calculation = lambda *_, **__: None
     result = calculator.calculate_trajectory(
         ammo=ammo,
         environment=environment,

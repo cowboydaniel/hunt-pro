@@ -130,7 +130,7 @@ from game_log import (  # noqa: E402  (import after installing stubs)
     WeatherCondition,
     WindDirection,
 )
-from intelligent_insights import (
+from intelligent_insights import (  # noqa: E402  (import after installing stubs)
     HistoricalHuntInsightModel,
     generate_after_action_report,
 )
@@ -239,7 +239,10 @@ def test_after_action_report_surfaces_performance_and_improvements():
             weather_condition=WeatherCondition.HEAVY_RAIN,
         ),
         _build_entry(
-            location_name="Meadow", hour=12, entry_type=EntryType.SIGHTING, weather_condition=WeatherCondition.CLEAR
+            location_name="Meadow",
+            hour=12,
+            entry_type=EntryType.SIGHTING,
+            weather_condition=WeatherCondition.CLEAR,
         ),
         GameEntry(
             timestamp=datetime(2024, 10, 15, 13, 0).timestamp(),
@@ -259,7 +262,9 @@ def test_after_action_report_surfaces_performance_and_improvements():
 
     assert report.top_locations[0].label == "Ridge Stand"
     heavy_rain = next(
-        outcome for outcome in report.weather_outcomes if outcome.label == WeatherCondition.HEAVY_RAIN.value
+        outcome
+        for outcome in report.weather_outcomes
+        if outcome.label == WeatherCondition.HEAVY_RAIN.value
     )
     assert heavy_rain.attempts == 3
     assert heavy_rain.successes == 0

@@ -1,7 +1,7 @@
 """Test package initialisation for Hunt Pro."""
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 # Ensure the repository root is importable when tests run from an isolated
 # working directory. Pytest can change the current directory during collection
