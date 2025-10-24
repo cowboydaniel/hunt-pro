@@ -168,7 +168,10 @@ def test_load_adapter_plugins_registers_contributions(monkeypatch):
     def fake_entry_points():
         return FakeEntryPoints([FakeEntryPoint()])
 
-    monkeypatch.setattr("device_manager.metadata", type("MetaModule", (), {"entry_points": staticmethod(fake_entry_points)}))
+    monkeypatch.setattr(
+        "device_manager.metadata",
+        type("MetaModule", (), {"entry_points": staticmethod(fake_entry_points)}),
+    )
 
     manager = DeviceManager(auto_load_plugins=False)
     registered = manager.load_adapter_plugins()
