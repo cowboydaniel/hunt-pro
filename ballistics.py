@@ -13,16 +13,19 @@ and comprehensive ammunition database for precision shooting applications.
 
 
 import math
+import shutil
 
-from typing import Dict, List, Optional, Tuple, NamedTuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, NamedTuple
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from enum import Enum
 
 import json
 
 from pathlib import Path
+
+from datetime import datetime, timezone
 
 
 
@@ -106,7 +109,33 @@ class EnvironmentalData:
 
     wind_direction: float = 0.0  # degrees (0 = headwind, 90 = right crosswind)
 
-    
+
+    def to_dict(self) -> Dict[str, float]:
+        """Serialize the environmental data to a dictionary."""
+        return {
+            "temperature": float(self.temperature),
+            "pressure": float(self.pressure),
+            "humidity": float(self.humidity),
+            "altitude": float(self.altitude),
+            "wind_speed": float(self.wind_speed),
+            "wind_direction": float(self.wind_direction),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "EnvironmentalData":
+        """Create an :class:`EnvironmentalData` instance from a dictionary."""
+        if data is None:
+            raise ValueError("Environmental data payload is required")
+
+        return cls(
+            temperature=float(data.get("temperature", 15.0)),
+            pressure=float(data.get("pressure", 1013.25)),
+            humidity=float(data.get("humidity", 50.0)),
+            altitude=float(data.get("altitude", 0.0)),
+            wind_speed=float(data.get("wind_speed", 0.0)),
+            wind_direction=float(data.get("wind_direction", 0.0)),
+        )
+
 
     @property
 
@@ -171,6 +200,78 @@ class Ammunition:
             self.name = f"{self.caliber} {self.bullet_weight}gr"
 
 
+    def to_dict(self) -> Dict[str, Any]:
+
+        """Serialize the ammunition to a dictionary suitable for JSON storage."""
+
+        return {
+
+            "name": self.name,
+
+            "caliber": self.caliber,
+
+            "bullet_weight": float(self.bullet_weight),
+
+            "muzzle_velocity": float(self.muzzle_velocity),
+
+            "ballistic_coefficient": float(self.ballistic_coefficient),
+
+            "drag_model": self.drag_model.value,
+
+            "bullet_diameter": float(self.bullet_diameter),
+
+            "case_length": float(self.case_length),
+
+            "overall_length": float(self.overall_length),
+
+        }
+
+
+    @classmethod
+
+    def from_dict(cls, data: Dict[str, Any]) -> "Ammunition":
+
+        """Construct an :class:`Ammunition` instance from a dictionary."""
+
+        if data is None:
+
+            raise ValueError("Ammunition payload is required")
+
+
+        drag_value = data.get("drag_model", DragModel.G1.value)
+
+        try:
+
+            drag_model = DragModel(drag_value)
+
+        except ValueError as exc:
+
+            raise ValueError(f"Unsupported drag model: {drag_value}") from exc
+
+
+        return cls(
+
+            name=data.get("name", ""),
+
+            caliber=data.get("caliber", ""),
+
+            bullet_weight=float(data.get("bullet_weight", 0.0)),
+
+            muzzle_velocity=float(data.get("muzzle_velocity", 0.0)),
+
+            ballistic_coefficient=float(data.get("ballistic_coefficient", 0.0)),
+
+            drag_model=drag_model,
+
+            bullet_diameter=float(data.get("bullet_diameter", 0.0)),
+
+            case_length=float(data.get("case_length", 0.0)),
+
+            overall_length=float(data.get("overall_length", 0.0)),
+
+        )
+
+
 
 class TrajectoryPoint(NamedTuple):
 
@@ -221,6 +322,128 @@ class BallisticsResult:
         mass_kg = self.ammunition.bullet_weight * 0.00006479891  # grains to kg
 
         return 0.5 * mass_kg * (self.ammunition.muzzle_velocity ** 2)
+
+
+@dataclass
+
+class BallisticProfile:
+
+    """Serialized snapshot capturing a complete ballistic setup."""
+
+    name: str
+
+    ammunition: Ammunition
+
+    environment: EnvironmentalData
+
+    zero_distance: float
+
+    max_range: float
+
+    vital_zone_diameter: float
+
+    notes: str = ""
+
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+    def to_dict(self) -> Dict[str, Any]:
+
+        """Serialize the profile to a JSON-friendly dictionary."""
+
+        return {
+
+            "name": self.name,
+
+            "ammunition": self.ammunition.to_dict(),
+
+            "environment": self.environment.to_dict(),
+
+            "zero_distance": float(self.zero_distance),
+
+            "max_range": float(self.max_range),
+
+            "vital_zone_diameter": float(self.vital_zone_diameter),
+
+            "notes": self.notes,
+
+            "created_at": self.created_at,
+
+            "updated_at": self.updated_at,
+
+        }
+
+
+    @classmethod
+
+    def from_dict(cls, data: Dict[str, Any]) -> "BallisticProfile":
+
+        """Create a profile from a dictionary payload."""
+
+        if data is None:
+
+            raise ValueError("Ballistic profile payload is required")
+
+
+        ammunition_payload = data.get("ammunition")
+
+        environment_payload = data.get("environment")
+
+
+        profile = cls(
+
+            name=data.get("name", "Unnamed Profile"),
+
+            ammunition=Ammunition.from_dict(ammunition_payload),
+
+            environment=EnvironmentalData.from_dict(environment_payload),
+
+            zero_distance=float(data.get("zero_distance", 100.0)),
+
+            max_range=float(data.get("max_range", 800.0)),
+
+            vital_zone_diameter=float(data.get("vital_zone_diameter", 0.2)),
+
+            notes=data.get("notes", ""),
+
+            created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
+
+            updated_at=data.get("updated_at", datetime.now(timezone.utc).isoformat()),
+
+        )
+
+        return profile
+
+
+    def touch(self) -> None:
+
+        """Update the modification timestamp."""
+
+        self.updated_at = datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+
+class BallisticProfileImportReport:
+
+    """Summary of an import operation for ballistic profiles."""
+
+    imported: List[str]
+
+    skipped: List[str]
+
+    overwritten: List[str]
+
+
+    @property
+
+    def total_imported(self) -> int:
+
+        """Return the total count of profiles applied to storage."""
+
+        return len(self.imported) + len(self.overwritten)
 
 
 
@@ -780,6 +1003,353 @@ class AmmunitionDatabase:
 
 
 
+class BallisticProfileStorage(LoggableMixin):
+
+    """Manage persistence for ballistic profiles with automated backups."""
+
+
+    def __init__(self, storage_dir: Optional[Path] = None, max_backups: int = 5):
+
+        super().__init__()
+
+        if storage_dir is None:
+
+            storage_dir = Path.home() / "HuntPro" / "ballistics"
+
+        self.storage_dir = Path(storage_dir)
+
+        self.storage_file = self.storage_dir / "profiles.json"
+
+        self.backup_dir = self.storage_dir / "backups"
+
+        self.max_backups = max(1, int(max_backups))
+
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
+
+
+    def load_profiles(self) -> Dict[str, BallisticProfile]:
+
+        """Load all saved ballistic profiles from disk."""
+
+        if not self.storage_file.exists():
+
+            return {}
+
+
+        try:
+
+            with self.storage_file.open("r", encoding="utf-8") as handle:
+
+                payload = json.load(handle)
+
+        except json.JSONDecodeError as exc:
+
+            self.log_warning("Failed to decode ballistic profile storage; preserving corrupted copy.", exception=exc)
+
+            self._preserve_corrupted_store()
+
+            return {}
+
+        except OSError as exc:
+
+            self.log_error("Unable to read ballistic profile storage", exception=exc)
+
+            return {}
+
+
+        profiles: Dict[str, BallisticProfile] = {}
+
+        for entry in payload.get("profiles", []):
+
+            try:
+
+                profile = BallisticProfile.from_dict(entry)
+
+            except Exception as exc:  # pragma: no cover - defensive logging
+
+                self.log_warning("Skipping malformed ballistic profile entry", exception=exc)
+
+                continue
+
+            profiles[profile.name] = profile
+
+
+        return profiles
+
+
+    def save_profile(self, profile: BallisticProfile) -> None:
+
+        """Persist a single profile and ensure a backup of the previous state."""
+
+        profiles = self.load_profiles()
+
+        profile.touch()
+
+        profiles[profile.name] = profile
+
+        self._write_profiles(profiles)
+
+        self.log_info(
+
+            "Saved ballistic profile",
+
+            category="DATA",
+
+            profile=profile.name,
+
+        )
+
+
+    def delete_profile(self, profile_name: str) -> bool:
+
+        """Delete a profile by name. Returns ``True`` if it existed."""
+
+        profiles = self.load_profiles()
+
+        if profile_name not in profiles:
+
+            return False
+
+        del profiles[profile_name]
+
+        self._write_profiles(profiles)
+
+        self.log_info("Deleted ballistic profile", category="DATA", profile=profile_name)
+
+        return True
+
+
+    def export_profiles(self, destination: Path, profile_names: Optional[Iterable[str]] = None) -> List[str]:
+
+        """Export selected profiles to a JSON file."""
+
+        destination = Path(destination)
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        profiles = self.load_profiles()
+
+        if profile_names is not None:
+
+            selection = []
+
+            missing = []
+
+            for name in profile_names:
+
+                if name in profiles:
+
+                    selection.append(profiles[name])
+
+                else:
+
+                    missing.append(name)
+
+            if missing:
+
+                raise KeyError(f"Unknown ballistic profiles requested for export: {', '.join(missing)}")
+
+        else:
+
+            selection = list(profiles.values())
+
+        export_payload = {
+
+            "version": 1,
+
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+
+            "profiles": [profile.to_dict() for profile in selection],
+
+        }
+
+        with destination.open("w", encoding="utf-8") as handle:
+
+            json.dump(export_payload, handle, indent=2, sort_keys=True)
+
+        self.log_info(
+
+            "Exported ballistic profiles",
+
+            category="DATA",
+
+            profile_count=len(selection),
+
+            destination=str(destination),
+
+        )
+
+        return [profile.name for profile in selection]
+
+
+    def import_profiles(self, source: Path, overwrite: bool = False) -> BallisticProfileImportReport:
+
+        """Import profiles from a JSON export."""
+
+        source = Path(source)
+
+        with source.open("r", encoding="utf-8") as handle:
+
+            payload = json.load(handle)
+
+        existing = self.load_profiles()
+
+        imported: List[str] = []
+
+        skipped: List[str] = []
+
+        overwritten: List[str] = []
+
+        for entry in payload.get("profiles", []):
+
+            profile = BallisticProfile.from_dict(entry)
+
+            if profile.name in existing:
+
+                if overwrite:
+
+                    overwritten.append(profile.name)
+
+                else:
+
+                    skipped.append(profile.name)
+
+                    continue
+
+            else:
+
+                imported.append(profile.name)
+
+            profile.touch()
+
+            existing[profile.name] = profile
+
+        if imported or overwritten:
+
+            self._write_profiles(existing)
+
+        report = BallisticProfileImportReport(imported=imported, skipped=skipped, overwritten=overwritten)
+
+        self.log_info(
+
+            "Imported ballistic profiles",
+
+            category="DATA",
+
+            imported=report.total_imported,
+
+            skipped=len(report.skipped),
+
+            source=str(source),
+
+        )
+
+        return report
+
+
+    def create_backup(self) -> Optional[Path]:
+
+        """Create a manual backup of the current profile store."""
+
+        return self._create_backup()
+
+
+    def list_backups(self) -> List[Path]:
+
+        """Return available backup files sorted by newest first."""
+
+        backups = sorted(self.backup_dir.glob("profiles-*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+
+        return backups
+
+
+    def _write_profiles(self, profiles: Dict[str, BallisticProfile]) -> None:
+
+        payload = {
+
+            "version": 1,
+
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+
+            "profiles": [profiles[name].to_dict() for name in sorted(profiles.keys())],
+
+        }
+
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+
+        if self.storage_file.exists():
+
+            self._create_backup()
+
+        with self.storage_file.open("w", encoding="utf-8") as handle:
+
+            json.dump(payload, handle, indent=2, sort_keys=True)
+
+
+    def _create_backup(self, suffix: str = "") -> Optional[Path]:
+
+        if not self.storage_file.exists():
+
+            return None
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+        suffix_segment = f"-{suffix}" if suffix else ""
+
+        backup_path = self.backup_dir / f"profiles{suffix_segment}-{timestamp}.json"
+
+        try:
+
+            shutil.copy2(self.storage_file, backup_path)
+
+        except OSError as exc:
+
+            self.log_warning("Failed to create ballistic profile backup", exception=exc)
+
+            return None
+
+        self._prune_backups()
+
+        return backup_path
+
+
+    def _prune_backups(self) -> None:
+
+        backups = sorted(self.backup_dir.glob("profiles-*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+
+        for stale_backup in backups[self.max_backups:]:
+
+            try:
+
+                stale_backup.unlink()
+
+            except OSError as exc:  # pragma: no cover - best effort cleanup
+
+                self.log_warning("Failed to remove old ballistic profile backup", exception=exc)
+
+
+    def _preserve_corrupted_store(self) -> None:
+
+        if not self.storage_file.exists():
+
+            return
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+        corrupted_path = self.backup_dir / f"profiles-corrupted-{timestamp}.json"
+
+        try:
+
+            shutil.copy2(self.storage_file, corrupted_path)
+
+        except OSError as exc:
+
+            self.log_warning("Failed to preserve corrupted ballistic profile store", exception=exc)
+
+
+
 
 
 class BallisticsModule(BaseModule):
@@ -795,6 +1365,8 @@ class BallisticsModule(BaseModule):
         self.calculator = BallisticsCalculator()
 
         self.ammo_db = AmmunitionDatabase()
+
+        self.profile_storage = BallisticProfileStorage()
 
         self.current_result: Optional[BallisticsResult] = None
 
@@ -1470,7 +2042,7 @@ class BallisticsModule(BaseModule):
 
                 self.ballistic_coefficient_spin.setValue(ammo.ballistic_coefficient)
 
-                
+
 
                 # Set drag model
 
@@ -1481,6 +2053,99 @@ class BallisticsModule(BaseModule):
                         self.drag_model_combo.setCurrentIndex(i)
 
                         break
+
+
+    def _get_active_ammunition(self) -> Ammunition:
+
+        """Return a copy of the currently configured ammunition."""
+
+        if self.caliber_combo.currentText() == "Custom":
+
+            drag_model = self.drag_model_combo.currentData()
+
+            if not isinstance(drag_model, DragModel):
+
+                drag_model = DragModel.G1
+
+            return Ammunition(
+
+                name="Custom",
+
+                caliber="Custom",
+
+                bullet_weight=self.bullet_weight_spin.value(),
+
+                muzzle_velocity=self.muzzle_velocity_spin.value(),
+
+                ballistic_coefficient=self.ballistic_coefficient_spin.value(),
+
+                drag_model=drag_model,
+
+            )
+
+        ammo = self.ammo_combo.currentData()
+
+        if not isinstance(ammo, Ammunition):
+
+            raise ValueError("No ammunition selected for ballistic profile")
+
+        return Ammunition.from_dict(ammo.to_dict())
+
+
+    def _apply_custom_ammunition(self, ammo: Ammunition) -> None:
+
+        """Apply a custom ammunition configuration to the UI."""
+
+        if self.caliber_combo.findText("Custom") >= 0:
+
+            self.caliber_combo.setCurrentText("Custom")
+
+        self.custom_ammo_group.setVisible(True)
+
+        self.bullet_weight_spin.setValue(ammo.bullet_weight)
+
+        self.muzzle_velocity_spin.setValue(ammo.muzzle_velocity)
+
+        self.ballistic_coefficient_spin.setValue(ammo.ballistic_coefficient)
+
+        drag_index = self.drag_model_combo.findData(ammo.drag_model)
+
+        if drag_index >= 0:
+
+            self.drag_model_combo.setCurrentIndex(drag_index)
+
+
+    def _apply_ammunition_to_ui(self, ammo: Ammunition) -> None:
+
+        """Populate UI widgets with the provided ammunition selection."""
+
+        caliber_index = self.caliber_combo.findText(ammo.caliber)
+
+        if caliber_index == -1 or ammo.caliber == "Custom":
+
+            self._apply_custom_ammunition(ammo)
+
+            return
+
+        self.caliber_combo.setCurrentIndex(caliber_index)
+
+        # Ensure ammunition list reflects the caliber before selection
+
+        self.on_caliber_changed(ammo.caliber)
+
+        for idx in range(self.ammo_combo.count()):
+
+            item_data = self.ammo_combo.itemData(idx)
+
+            if isinstance(item_data, Ammunition) and item_data.name == ammo.name:
+
+                self.ammo_combo.setCurrentIndex(idx)
+
+                break
+
+        else:
+
+            self._apply_custom_ammunition(ammo)
 
     
 
@@ -2161,6 +2826,190 @@ Distance    Drop      Velocity   Energy    Time     Wind Drift
         return "Ballistics Calculator"
 
     
+
+    def create_profile_snapshot(self, name: str, notes: str = "") -> BallisticProfile:
+
+        """Capture the current module configuration as a ballistic profile."""
+
+        normalized_name = name.strip()
+
+        if not normalized_name:
+
+            raise ValueError("Profile name is required")
+
+        ammunition = self._get_active_ammunition()
+
+        environment = EnvironmentalData(
+
+            temperature=float(self.temperature_spin.value()),
+
+            pressure=float(self.pressure_spin.value()),
+
+            humidity=float(self.humidity_spin.value()),
+
+            altitude=float(self.altitude_spin.value()),
+
+            wind_speed=float(self.wind_speed_spin.value()),
+
+            wind_direction=float(self.wind_direction_spin.value()),
+
+        )
+
+        profile = BallisticProfile(
+
+            name=normalized_name,
+
+            ammunition=ammunition,
+
+            environment=environment,
+
+            zero_distance=float(self.zero_distance_spin.value()),
+
+            max_range=float(self.max_range_spin.value()),
+
+            vital_zone_diameter=float(self.vital_zone_spin.value()),
+
+            notes=notes.strip(),
+
+        )
+
+        return profile
+
+
+    def save_ballistic_profile(self, name: str, notes: str = "") -> BallisticProfile:
+
+        """Persist a ballistic profile snapshot to disk."""
+
+        profile = self.create_profile_snapshot(name, notes)
+
+        self.profile_storage.save_profile(profile)
+
+        self.status_message.emit(f"Saved ballistic profile '{profile.name}'")
+
+        self.log_user_action("ballistic_profile_saved", {"profile": profile.name})
+
+        return profile
+
+
+    def load_ballistic_profile(self, name: str) -> BallisticProfile:
+
+        """Load a saved ballistic profile and apply it to the UI."""
+
+        profiles = self.profile_storage.load_profiles()
+
+        if name not in profiles:
+
+            raise KeyError(f"Ballistic profile '{name}' not found")
+
+        profile = profiles[name]
+
+        self._apply_ammunition_to_ui(profile.ammunition)
+
+        environment = profile.environment
+
+        def apply_spin(spin, value):
+
+            minimum = spin.minimum()
+
+            maximum = spin.maximum()
+
+            coerced = max(minimum, min(maximum, value))
+
+            if isinstance(spin, QSpinBox):
+
+                spin.setValue(int(round(coerced)))
+
+            else:
+
+                spin.setValue(float(coerced))
+
+        apply_spin(self.temperature_spin, environment.temperature)
+
+        apply_spin(self.pressure_spin, environment.pressure)
+
+        apply_spin(self.humidity_spin, environment.humidity)
+
+        apply_spin(self.altitude_spin, environment.altitude)
+
+        apply_spin(self.wind_speed_spin, environment.wind_speed)
+
+        apply_spin(self.wind_direction_spin, environment.wind_direction)
+
+        apply_spin(self.zero_distance_spin, profile.zero_distance)
+
+        apply_spin(self.max_range_spin, profile.max_range)
+
+        apply_spin(self.vital_zone_spin, profile.vital_zone_diameter)
+
+        self.status_message.emit(f"Loaded ballistic profile '{profile.name}'")
+
+        self.log_user_action("ballistic_profile_loaded", {"profile": profile.name})
+
+        return profile
+
+
+    def list_ballistic_profiles(self) -> List[str]:
+
+        """Return the names of saved ballistic profiles."""
+
+        return sorted(self.profile_storage.load_profiles().keys())
+
+
+    def export_ballistic_profiles(self, file_path: str, profile_names: Optional[List[str]] = None) -> List[str]:
+
+        """Export selected ballistic profiles to a JSON file."""
+
+        exported = self.profile_storage.export_profiles(file_path, profile_names)
+
+        self.status_message.emit(f"Exported {len(exported)} ballistic profile(s)")
+
+        self.log_user_action(
+
+            "ballistic_profiles_exported",
+
+            {"count": len(exported), "file_path": str(file_path)},
+
+        )
+
+        return exported
+
+
+    def import_ballistic_profiles(self, file_path: str, overwrite: bool = False) -> BallisticProfileImportReport:
+
+        """Import ballistic profiles from disk."""
+
+        report = self.profile_storage.import_profiles(file_path, overwrite=overwrite)
+
+        if report.total_imported:
+
+            message = f"Imported {report.total_imported} ballistic profile(s)"
+
+        else:
+
+            message = "No ballistic profiles were imported"
+
+        self.status_message.emit(message)
+
+        self.log_user_action(
+
+            "ballistic_profiles_imported",
+
+            {
+
+                "count": report.total_imported,
+
+                "skipped": len(report.skipped),
+
+                "file_path": str(file_path),
+
+                "overwrite": overwrite,
+
+            },
+
+        )
+
+        return report
+
 
     def get_description(self) -> str:
 
