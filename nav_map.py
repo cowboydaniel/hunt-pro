@@ -6,7 +6,15 @@ for hunting and outdoor activities.
 import json
 import math
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, NamedTuple, Any
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 from dataclasses import dataclass, field, asdict
 from enum import Enum, auto
 from datetime import datetime
@@ -219,35 +227,51 @@ class GPSTrack:
     def end_coordinate(self) -> Optional[GPSCoordinate]:
         """Get ending coordinate."""
         return self.points[-1].coordinate if self.points else None
-class MockGPSProvider(QObject, LoggableMixin):
-    """Mock GPS provider for testing and simulation."""
+class BaseGPSProvider(QObject, LoggableMixin):
+    """Base class for GPS providers with common lifecycle management."""
     position_updated = Signal(float, float, float, float)  # lat, lon, altitude, accuracy
     def __init__(self):
         QObject.__init__(self)
         LoggableMixin.__init__(self)
-        self.is_active = False
+        self._active = False
+    @property
+    def is_active(self) -> bool:
+        """Return whether the provider is currently emitting updates."""
+        return self._active
+    def start(self):
+        """Start emitting GPS updates."""
+        if not self._active:
+            self._active = True
+            self._on_start()
+    def stop(self):
+        """Stop emitting GPS updates."""
+        if self._active:
+            self._active = False
+            self._on_stop()
+    def _on_start(self):
+        raise NotImplementedError
+    def _on_stop(self):
+        raise NotImplementedError
+class RandomWalkGPSProvider(BaseGPSProvider):
+    """Pseudo-random GPS provider useful for manual testing."""
+    def __init__(self, interval_ms: int = 1000):
+        super().__init__()
         self.current_position = GPSCoordinate(40.7128, -74.0060, 10.0, 5.0)  # New York City
         self.timer = QTimer()
+        self.timer.setInterval(interval_ms)
         self.timer.timeout.connect(self._simulate_movement)
-    def start(self):
-        """Start GPS updates."""
-        if not self.is_active:
-            self.is_active = True
-            self.timer.start(1000)  # Update every second
-            self.log_info("Mock GPS provider started")
-    def stop(self):
-        """Stop GPS updates."""
-        if self.is_active:
-            self.is_active = False
-            self.timer.stop()
-            self.log_info("Mock GPS provider stopped")
+    def _on_start(self):
+        self.timer.start()
+        self.log_info("Random walk GPS provider started")
+    def _on_stop(self):
+        self.timer.stop()
+        self.log_info("Random walk GPS provider stopped")
     def _simulate_movement(self):
         """Simulate GPS movement for testing."""
-        # Add small random variations to position
         import random
         lat_delta = (random.random() - 0.5) * 0.0001  # ~10m variation
         lon_delta = (random.random() - 0.5) * 0.0001
-        alt_delta = (random.random() - 0.5) * 2.0  # Â±1m altitude variation
+        alt_delta = (random.random() - 0.5) * 2.0  # ±1m altitude variation
         self.current_position.latitude += lat_delta
         self.current_position.longitude += lon_delta
         self.current_position.altitude += alt_delta
@@ -257,8 +281,123 @@ class MockGPSProvider(QObject, LoggableMixin):
             self.current_position.latitude,
             self.current_position.longitude,
             self.current_position.altitude,
-            self.current_position.accuracy
+            self.current_position.accuracy,
         )
+class SimulatedGPSProvider(BaseGPSProvider):
+    """GPS provider that replays deterministic samples for training scenarios."""
+    def __init__(
+        self,
+        samples: Sequence[GPSCoordinate],
+        interval_ms: Optional[int] = 1000,
+        loop: bool = False,
+    ):
+        super().__init__()
+        self._samples = list(samples)
+        self._interval_ms = interval_ms
+        self._loop = loop
+        self._index = 0
+        self._timer = None if interval_ms is None else QTimer()
+        if self._timer is not None:
+            self._timer.setInterval(interval_ms)
+            self._timer.timeout.connect(self._emit_next)
+    def _on_start(self):
+        self._index = 0 if self._index >= len(self._samples) else self._index
+        if self._timer is not None and self._samples:
+            self._timer.start()
+            self.log_info(
+                "Simulated GPS provider started with %d samples", len(self._samples)
+            )
+        elif not self._samples:
+            self.log_warning("Simulated GPS provider started without samples")
+    def _on_stop(self):
+        if self._timer is not None:
+            self._timer.stop()
+        if self._samples:
+            self.log_info("Simulated GPS provider stopped after replay")
+    def manual_step(self):
+        """Emit the next sample immediately (useful for tests)."""
+        if self.is_active:
+            self._emit_next()
+    def _emit_next(self):
+        if not self._samples:
+            return
+        if self._index >= len(self._samples):
+            if self._loop:
+                self._index = 0
+            else:
+                self.stop()
+                return
+        coordinate = self._samples[self._index]
+        self._index += 1
+        coordinate.timestamp = datetime.now().timestamp()
+        self.position_updated.emit(
+            coordinate.latitude,
+            coordinate.longitude,
+            coordinate.altitude or 0.0,
+            coordinate.accuracy or 0.0,
+        )
+        if not self._loop and self._index >= len(self._samples):
+            # Stop automatically after the final sample has been emitted.
+            self.stop()
+    @staticmethod
+    def from_feed(
+        feed_source: Union[
+            Sequence[GPSCoordinate],
+            Sequence[TrackPoint],
+            GPSTrack,
+            Path,
+            str,
+            Sequence[Dict[str, Any]],
+        ],
+        interval_ms: Optional[int] = 1000,
+        loop: bool = False,
+    ) -> "SimulatedGPSProvider":
+        """Create a simulated provider from a variety of sources."""
+        coordinates = SimulatedGPSProvider._normalize_feed(feed_source)
+        return SimulatedGPSProvider(coordinates, interval_ms=interval_ms, loop=loop)
+    @staticmethod
+    def _normalize_feed(
+        feed_source: Union[
+            Sequence[GPSCoordinate],
+            Sequence[TrackPoint],
+            GPSTrack,
+            Path,
+            str,
+            Sequence[Dict[str, Any]],
+        ]
+    ) -> List[GPSCoordinate]:
+        if isinstance(feed_source, GPSTrack):
+            return [point.coordinate for point in feed_source.points if point.coordinate]
+        if isinstance(feed_source, (str, Path)):
+            path = Path(feed_source)
+            data = json.loads(path.read_text())
+            return SimulatedGPSProvider._normalize_feed(data)
+        coordinates: List[GPSCoordinate] = []
+        for entry in feed_source:
+            if isinstance(entry, GPSCoordinate):
+                coordinates.append(entry)
+            elif isinstance(entry, TrackPoint):
+                coordinates.append(entry.coordinate)
+            elif isinstance(entry, dict):
+                if 'latitude' in entry and 'longitude' in entry:
+                    coordinates.append(GPSCoordinate(**entry))
+                elif 'coordinate' in entry:
+                    coordinates.append(GPSCoordinate(**entry['coordinate']))
+                elif 'points' in entry:
+                    for point_dict in entry['points']:
+                        coord_dict = point_dict.get('coordinate')
+                        if coord_dict:
+                            coordinates.append(GPSCoordinate(**coord_dict))
+                else:
+                    raise TypeError(
+                        "Unsupported dictionary structure in simulated GPS feed"
+                    )
+            else:
+                raise TypeError(
+                    "Unsupported feed entry type for simulated GPS provider: "
+                    f"{type(entry)!r}"
+                )
+        return coordinates
 class CompassWidget(QWidget):
     """Custom compass widget for navigation."""
     def __init__(self, parent=None):
@@ -336,7 +475,7 @@ class NavigationModule(BaseModule):
     """Main navigation and mapping module for Hunt Pro."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.gps_provider = MockGPSProvider()
+        self.gps_provider: Optional[BaseGPSProvider] = None
         self.waypoints: List[Waypoint] = []
         self.tracks: List[GPSTrack] = []
         self.current_position: Optional[GPSCoordinate] = None
@@ -354,9 +493,59 @@ class NavigationModule(BaseModule):
         self.pois_file = self.data_dir / "points_of_interest.json"
         self.setup_ui()
         self.load_data()
-        # Connect GPS signals
-        self.gps_provider.position_updated.connect(self.on_position_updated)
+        # Default to pseudo-random GPS provider for manual operation
+        self.set_gps_provider(RandomWalkGPSProvider())
         self.log_info("Navigation module initialized")
+    def set_gps_provider(self, provider: BaseGPSProvider):
+        """Swap the active GPS provider used by the module."""
+        if provider is self.gps_provider:
+            return
+        if self.gps_provider is not None:
+            try:
+                self.gps_provider.position_updated.disconnect(self.on_position_updated)
+            except (TypeError, RuntimeError):
+                pass
+            self.gps_provider.stop()
+        self.gps_provider = provider
+        if self.gps_provider is not None:
+            self.gps_provider.position_updated.connect(self.on_position_updated)
+            self.log_info(
+                "GPS provider set to %s", self.gps_provider.__class__.__name__
+            )
+    def use_simulated_gps_feed(
+        self,
+        feed_source: Union[
+            Sequence[GPSCoordinate],
+            Sequence[TrackPoint],
+            GPSTrack,
+            Path,
+            str,
+            Sequence[Dict[str, Any]],
+        ],
+        interval_ms: Optional[int] = 1000,
+        loop: bool = False,
+    ) -> SimulatedGPSProvider:
+        """Configure the module to use a simulated GPS feed.
+
+        Parameters
+        ----------
+        feed_source:
+            The source of simulated coordinates. This can be a list of
+            ``GPSCoordinate`` objects, dictionaries containing coordinate
+            fields, a ``GPSTrack`` instance, or a filesystem path to a JSON
+            file with serialized coordinates.
+        interval_ms:
+            Milliseconds between emitted samples. When ``None`` the caller can
+            advance the simulation manually via :meth:`SimulatedGPSProvider.manual_step`.
+        loop:
+            When ``True`` the feed restarts automatically when it reaches the
+            final sample. This is handy for repeated training laps.
+        """
+        provider = SimulatedGPSProvider.from_feed(
+            feed_source, interval_ms=interval_ms, loop=loop
+        )
+        self.set_gps_provider(provider)
+        return provider
     def setup_ui(self):
         """Setup the navigation user interface."""
         layout = QVBoxLayout(self)
@@ -690,6 +879,10 @@ class NavigationModule(BaseModule):
         self.setStyleSheet(style)
     def start_gps(self):
         """Start GPS tracking."""
+        if self.gps_provider is None:
+            self.status_message.emit("No GPS provider configured")
+            self.log_warning("Attempted to start GPS without provider")
+            return
         self.gps_provider.start()
         self.start_gps_btn.setEnabled(False)
         self.stop_gps_btn.setEnabled(True)
@@ -699,6 +892,8 @@ class NavigationModule(BaseModule):
         self.log_user_action("gps_started")
     def stop_gps(self):
         """Stop GPS tracking."""
+        if self.gps_provider is None:
+            return
         self.gps_provider.stop()
         self.start_gps_btn.setEnabled(True)
         self.stop_gps_btn.setEnabled(False)
