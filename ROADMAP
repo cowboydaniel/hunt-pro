@@ -15,7 +15,7 @@ This roadmap is structured as nine progressive phases that build from core stabi
 ## Phase 4 – Configuration Experience
 - [x] Design a unified settings interface surfaced from `main.py` with clear grouping and tooltips.
 - [x] Add input validation and contextual error messages before persisting configuration changes.
-- Support profile presets so operators can switch loadouts or regions with a single action.
+- [x] Support profile presets so operators can switch loadouts or regions with a single action.
 ## Phase 5 – Mapping & Navigation Evolution
 - Integrate offline map tile caching with fallback rendering when connectivity is limited.
 - Enhance `nav_map.py` to support terrain overlays, elevation contours, and point-of-interest tagging.
