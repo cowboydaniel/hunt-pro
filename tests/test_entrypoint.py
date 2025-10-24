@@ -1,5 +1,7 @@
 """Smoke tests for the Hunt Pro entrypoint module."""
+
 from __future__ import annotations
+
 import builtins
 import importlib.util
 import io
@@ -7,7 +9,10 @@ import sys
 import types
 from contextlib import redirect_stdout
 from pathlib import Path
+
 import pytest
+
+
 def load_entrypoint_module():
     """Load the project entrypoint module without running it as ``__main__``."""
     module_path = Path(__file__).resolve().parents[1] / "__main__.py"
