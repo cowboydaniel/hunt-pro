@@ -25,6 +25,7 @@ from PySide6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QPixmap
 from PySide6.QtCharts import QChart, QChartView, QScatterSeries
 from main import BaseModule
 from logger import get_logger, LoggableMixin
+from map_tile_cache import CachedTile, MapTileCache, TileSource
 class WaypointType(Enum):
     """Types of waypoints for navigation."""
     STAND = "Tree Stand"
@@ -299,6 +300,7 @@ class NavigationModule(BaseModule):
         self.current_position: Optional[GPSCoordinate] = None
         self.current_track: Optional[GPSTrack] = None
         self.is_tracking = False
+        self.tile_cache = MapTileCache()
         # Data files
         self.data_dir = Path.home() / "HuntPro" / "navigation"
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -504,6 +506,9 @@ class NavigationModule(BaseModule):
         self.map_chart_view = QChartView()
         self.map_chart_view.setMinimumHeight(400)
         layout.addWidget(self.map_chart_view)
+        self.map_status_label = QLabel("Map tiles will be cached for offline use once loaded.")
+        self.map_status_label.setObjectName("statusLabel")
+        layout.addWidget(self.map_status_label)
         return tab
     def apply_styling(self):
         """Apply styling to the navigation module."""
@@ -756,14 +761,24 @@ class NavigationModule(BaseModule):
         for waypoint in self.waypoints:
             self.target_waypoint_combo.addItem(f"{waypoint.name} ({waypoint.waypoint_type.value})", waypoint)
     def center_map_on_position(self):
-        """Center map on current position."""
-        if self.current_position:
-            self.update_map_display()
-            self.status_message.emit("Map centered on current position")
-        else:
+        """Center map on current position and fetch a tile."""
+        if not self.current_position:
             QMessageBox.information(self, "No Position", "No current GPS position available.")
-    def update_map_display(self):
-        """Update the map display with waypoints and tracks."""
+            return
+        zoom = 14
+        mode_data = self.map_mode_combo.currentData()
+        mode_key = mode_data.name if isinstance(mode_data, Enum) else str(mode_data)
+        tile_x, tile_y = self.tile_cache.coordinate_to_tile(
+            self.current_position.latitude,
+            self.current_position.longitude,
+            zoom,
+        )
+        tile = self.tile_cache.get_tile(zoom, tile_x, tile_y, mode_key)
+        self.update_map_display(tile)
+        self.status_message.emit("Map centered on current position")
+
+    def update_map_display(self, tile: Optional[CachedTile] = None):
+        """Update the map display with waypoints, tracks, and cached tiles."""
         try:
             chart = QChart()
             chart.setTitle("Navigation Map")
@@ -785,6 +800,19 @@ class NavigationModule(BaseModule):
             chart.createDefaultAxes()
             chart.axes(Qt.Horizontal)[0].setTitleText("Longitude")
             chart.axes(Qt.Vertical)[0].setTitleText("Latitude")
+            if tile:
+                pixmap = QPixmap(str(tile.path))
+                if not pixmap.isNull():
+                    scaled = pixmap.scaled(512, 512, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    chart.setBackgroundBrush(QBrush(scaled))
+                status_messages = {
+                    TileSource.NETWORK: "Live map tile downloaded and cached for offline use.",
+                    TileSource.CACHE: "Loaded cached map tile for offline navigation.",
+                    TileSource.FALLBACK: "Offline placeholder map tile shown (network unavailable).",
+                }
+                self.map_status_label.setText(status_messages[tile.source])
+            else:
+                self.map_status_label.setText("Map display updated.")
             self.map_chart_view.setChart(chart)
         except Exception as e:
             self.log_error("Failed to update map display", exception=e)
