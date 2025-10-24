@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, NamedTuple
 from dataclasses import dataclass, field
 from enum import Enum
 import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime, timezone
 from PySide6.QtWidgets import (
@@ -16,7 +17,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QPushButton, QLabel, QLineEdit, QSpinBox, QDoubleSpinBox,
     QComboBox, QTextEdit, QTableWidget, QTableWidgetItem, QGroupBox,
     QScrollArea, QFrame, QSlider, QCheckBox, QProgressBar, QSplitter,
-    QHeaderView, QMessageBox
+    QHeaderView, QMessageBox, QFileDialog
 )
 from PySide6.QtCore import (
     Qt, Signal, QTimer, QThread, QObject, QSettings
@@ -786,6 +787,19 @@ class BallisticsModule(BaseModule):
         self.create_comeups_tab()
         # Summary tab
         self.create_summary_tab()
+        # Export controls
+        export_group = QGroupBox("ðŸ“¼ Export Trajectory")
+        export_layout = QHBoxLayout(export_group)
+        export_layout.addWidget(QLabel("Format:"))
+        self.export_format_combo = QComboBox()
+        self.export_format_combo.addItems(["CSV", "JSON", "KML"])
+        export_layout.addWidget(self.export_format_combo)
+        export_layout.addStretch()
+        self.export_results_btn = QPushButton("ðŸ’¾ Export Results")
+        self.export_results_btn.clicked.connect(self.prompt_export_results)
+        self.export_results_btn.setEnabled(False)
+        export_layout.addWidget(self.export_results_btn)
+        layout.addWidget(export_group)
         return panel
     def create_data_table_tab(self):
         """Create trajectory data table tab."""
@@ -833,6 +847,30 @@ class BallisticsModule(BaseModule):
         self.summary_text.setFont(QFont("monospace", 10))
         layout.addWidget(self.summary_text)
         self.results_tabs.addTab(tab, "ðŸ“‹ Summary")
+
+    def prompt_export_results(self):
+        """Prompt the user to export current trajectory results."""
+        if not self.current_result:
+            QMessageBox.information(self, "No Results", "Please calculate a trajectory before exporting.")
+            return
+        format_type = self.export_format_combo.currentText()
+        ammo_name = self.current_result.ammunition.name if self.current_result.ammunition else "trajectory"
+        safe_stem = ''.join(ch if ch.isalnum() else '_' for ch in ammo_name).strip('_') or 'trajectory'
+        default_name = f"{safe_stem.lower()}_{datetime.now().strftime('%Y%m%d')}.{format_type.lower()}"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Export Ballistics as {format_type}",
+            default_name,
+            f"{format_type} Files (*.{format_type.lower()})"
+        )
+        if not file_path:
+            return
+        try:
+            self.export_results(file_path, format_type)
+            self.status_message.emit(f"Exported trajectory to {Path(file_path).name}")
+        except Exception as exc:
+            self.log_error("Failed to export ballistics results", exception=exc)
+            QMessageBox.critical(self, "Export Error", f"Failed to export results: {str(exc)}")
     def apply_styling(self):
         """Apply styling to the ballistics module."""
         style = """
@@ -987,6 +1025,8 @@ class BallisticsModule(BaseModule):
             self.update_trajectory_chart()
             self.update_data_table()
             self.update_summary()
+            if hasattr(self, 'export_results_btn'):
+                self.export_results_btn.setEnabled(True)
             self.status_message.emit(f"Calculated trajectory for {ammo.name}")
             self.log_user_action("ballistics_calculated", {
                 "ammunition": ammo.name,
@@ -1151,6 +1191,8 @@ Distance    Drop      Velocity   Energy    Time     Wind Drift
                 self._export_csv(file_path)
             elif format_type.upper() == "JSON":
                 self._export_json(file_path)
+            elif format_type.upper() == "KML":
+                self._export_kml(file_path)
             else:
                 raise ValueError(f"Unsupported export format: {format_type}")
             self.log_user_action("ballistics_export", {
@@ -1220,6 +1262,59 @@ Distance    Drop      Velocity   Energy    Time     Wind Drift
         }
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+
+    def _export_kml(self, file_path: str):
+        """Export results to KML format for interoperability with mapping tools."""
+        kml = ET.Element('kml', xmlns="http://www.opengis.net/kml/2.2")
+        document = ET.SubElement(kml, 'Document')
+        ammo_name = self.current_result.ammunition.name
+        ET.SubElement(document, 'name').text = f"Ballistic Trajectory - {ammo_name}"
+
+        summary = ET.SubElement(document, 'Placemark')
+        ET.SubElement(summary, 'name').text = 'Trajectory Summary'
+        summary_lines = [
+            f"Ammunition: {ammo_name}",
+            f"Zero Distance: {self.current_result.zero_distance} m",
+            f"Environment: {self.current_result.environment.temperature}°C, {self.current_result.environment.pressure} hPa",
+        ]
+        ET.SubElement(summary, 'description').text = '\n'.join(summary_lines)
+
+        series_folder = ET.SubElement(document, 'Folder')
+        ET.SubElement(series_folder, 'name').text = 'Trajectory Data Points'
+
+        for point in self.current_result.trajectory:
+            placemark = ET.SubElement(series_folder, 'Placemark')
+            ET.SubElement(placemark, 'name').text = f"{point.distance:.0f} m"
+            description = [
+                f"Drop: {point.drop * 100:.1f} cm",
+                f"Velocity: {point.velocity:.1f} m/s",
+                f"Energy: {point.energy:.0f} J",
+                f"Time: {point.time:.3f} s",
+                f"Wind Drift: {point.windage * 100:.1f} cm",
+            ]
+            ET.SubElement(placemark, 'description').text = '\n'.join(description)
+
+            extended = ET.SubElement(placemark, 'ExtendedData')
+            values = {
+                'distance_m': point.distance,
+                'drop_m': point.drop,
+                'velocity_mps': point.velocity,
+                'energy_j': point.energy,
+                'time_s': point.time,
+                'windage_m': point.windage,
+            }
+            for key, value in values.items():
+                data = ET.SubElement(extended, 'Data', name=key)
+                ET.SubElement(data, 'value').text = f"{value}"
+
+            point_element = ET.SubElement(placemark, 'Point')
+            # Encode range along longitude (kilometers) with drop influencing altitude for visualization
+            longitude = point.distance / 1000.0
+            altitude = -point.drop
+            ET.SubElement(point_element, 'coordinates').text = f"{longitude:.6f},0,{altitude:.6f}"
+
+        tree = ET.ElementTree(kml)
+        tree.write(file_path, encoding='utf-8', xml_declaration=True)
     def cleanup(self):
         """Clean up resources when module is closed."""
         self.save_settings()
