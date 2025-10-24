@@ -10,16 +10,13 @@ import pytest
 def _install_qt_stubs() -> None:
     if "PySide6" in sys.modules:
         return
-
     qt_module = types.ModuleType("PySide6")
     sys.modules["PySide6"] = qt_module
-
     def _create_module(name: str, class_names):
         module = types.ModuleType(name)
         for class_name in class_names:
             setattr(module, class_name, type(class_name, (), {}))
         return module
-
     widgets_names = [
         "QWidget",
         "QVBoxLayout",
@@ -53,41 +50,31 @@ def _install_qt_stubs() -> None:
     widgets_module = _create_module("PySide6.QtWidgets", widgets_names)
     qt_module.QtWidgets = widgets_module
     sys.modules["PySide6.QtWidgets"] = widgets_module
-
     class Signal:
         def __init__(self, *args, **kwargs):
             pass
-
         def connect(self, *args, **kwargs):
             pass
-
         def emit(self, *args, **kwargs):
             pass
-
     class QThread:
         def __init__(self, *args, **kwargs):
             pass
-
         def start(self):
             pass
-
         def quit(self):
             pass
-
         def wait(self):
             pass
-
     class QTimer:
         @staticmethod
         def singleShot(*args, **kwargs):
             pass
-
     class QtNamespace:
         ScrollBarAsNeeded = 0
         Horizontal = 1
         UserRole = 32
         AlignRight = 0
-
     core_module = types.ModuleType("PySide6.QtCore")
     core_module.Signal = Signal
     core_module.QThread = QThread
@@ -104,48 +91,36 @@ def _install_qt_stubs() -> None:
         setattr(core_module, name, type(name, (), {}))
     qt_module.QtCore = core_module
     sys.modules["PySide6.QtCore"] = core_module
-
     gui_module = _create_module(
         "PySide6.QtGui",
         ["QFont", "QColor", "QPixmap", "QPainter"],
     )
     qt_module.QtGui = gui_module
     sys.modules["PySide6.QtGui"] = gui_module
-
     charts_module = _create_module(
         "PySide6.QtCharts",
         ["QChart", "QChartView", "QPieSeries", "QBarSeries", "QBarSet"],
     )
     qt_module.QtCharts = charts_module
     sys.modules["PySide6.QtCharts"] = charts_module
-
-
 _install_qt_stubs()
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-
 if "main" not in sys.modules:
     main_module = types.ModuleType("main")
-
     class BaseModule:
         def __init__(self, *args, **kwargs):
             pass
-
     main_module.BaseModule = BaseModule
     sys.modules["main"] = main_module
-
 game_log = importlib.import_module("game_log")
-
 GameLogValidator = game_log.GameLogValidator
 GameLogValidationError = game_log.GameLogValidationError
 EntryType = game_log.EntryType
 GameSpecies = game_log.GameSpecies
 WeatherCondition = game_log.WeatherCondition
 WindDirection = game_log.WindDirection
-
-
 def build_entry(**overrides):
     base_entry = {
         "id": "test-id",
@@ -179,12 +154,9 @@ def build_entry(**overrides):
     }
     base_entry.update(overrides)
     return base_entry
-
-
 def test_validate_document_normalizes_legacy_list():
     entry = build_entry()
     version, entries = GameLogValidator.validate_document([entry])
-
     assert version == 0
     assert len(entries) == 1
     normalized = entries[0]
@@ -195,18 +167,13 @@ def test_validate_document_normalizes_legacy_list():
     assert normalized["field_dressed"] is True
     assert normalized["antler_points"] == 8
     assert pytest.approx(normalized["shot_distance"], rel=1e-5) == 32.7
-
-
 def test_validate_document_rejects_invalid_entry_type():
     entry = build_entry(entry_type="Invalid Type")
-
     with pytest.raises(GameLogValidationError):
         GameLogValidator.validate_document({
             "schema_version": GameLogValidator.CURRENT_VERSION,
             "entries": [entry],
         })
-
-
 def test_validate_document_rejects_unknown_schema():
     with pytest.raises(GameLogValidationError):
         GameLogValidator.validate_document({
