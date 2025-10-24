@@ -30,6 +30,99 @@ from logger import get_logger, setup_logger
 from keyboard import VirtualKeyboardManager
 from numpad import VirtualNumpadManager
 from config_validation import validate_configuration, ValidationIssue
+
+# ---------------------------------------------------------------------------
+# Profile presets
+# ---------------------------------------------------------------------------
+
+PROFILE_PRESETS = [
+    {
+        "key": "mountain_marksman",
+        "title": "Mountain Marksman",
+        "description": (
+            "North American big-game preset with resilient offline navigation, "
+            "long retention for harvest logs, and a balanced visual setup."
+        ),
+        "general": {
+            "primary_region": "North America",
+            "log_retention": 90,
+            "auto_backup": True,
+            "prompt_before_sync": True,
+            "launch_on_start": True,
+            "show_tips": False,
+        },
+        "display": {
+            "theme": "Dark",
+            "font_scale": 105,
+            "high_contrast": True,
+            "distance_units": "Imperial (yards)",
+            "temperature_units": "Fahrenheit",
+        },
+        "modules": {
+            "ballistics": True,
+            "nav_map": True,
+            "game_log": True,
+        },
+    },
+    {
+        "key": "euro_stalker",
+        "title": "European Stalker",
+        "description": (
+            "Optimized for roaming hunts across European forests with metric "
+            "units and streamlined startup modules."
+        ),
+        "general": {
+            "primary_region": "Europe",
+            "log_retention": 60,
+            "auto_backup": True,
+            "prompt_before_sync": False,
+            "launch_on_start": False,
+            "show_tips": True,
+        },
+        "display": {
+            "theme": "Auto",
+            "font_scale": 100,
+            "high_contrast": False,
+            "distance_units": "Metric (meters)",
+            "temperature_units": "Celsius",
+        },
+        "modules": {
+            "ballistics": True,
+            "nav_map": True,
+            "game_log": False,
+        },
+    },
+    {
+        "key": "savanna_outfitter",
+        "title": "Savanna Outfitter",
+        "description": (
+            "High-visibility preset for guided operations in African reserves "
+            "with aggressive backups and enhanced mapping."
+        ),
+        "general": {
+            "primary_region": "Africa",
+            "log_retention": 45,
+            "auto_backup": True,
+            "prompt_before_sync": True,
+            "launch_on_start": True,
+            "show_tips": True,
+        },
+        "display": {
+            "theme": "Light",
+            "font_scale": 110,
+            "high_contrast": True,
+            "distance_units": "Metric (meters)",
+            "temperature_units": "Celsius",
+        },
+        "modules": {
+            "ballistics": True,
+            "nav_map": True,
+            "game_log": True,
+        },
+    },
+]
+
+PROFILE_PRESET_MAP = {preset["key"]: preset for preset in PROFILE_PRESETS}
 class BaseModule(QWidget):
     """Base class for all Hunt Pro modules."""
     # Enhanced signals
@@ -93,7 +186,10 @@ class SettingsDialog(QDialog):
         self.setWindowTitle('Hunt Pro Settings')
         self.setModal(True)
         self.resize(720, 520)
+        self._suppress_profile_custom = False
         self._build_ui()
+        self._connect_profile_watchers()
+        self._handle_preset_change()
         self.load_settings()
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -130,6 +226,26 @@ class SettingsDialog(QDialog):
         identity_form.addRow('Primary Region', self.primary_region_combo)
         identity_group.setLayout(identity_form)
         layout.addWidget(identity_group)
+
+        preset_group = QGroupBox('Profile Presets')
+        preset_layout = QVBoxLayout()
+        selector_layout = QHBoxLayout()
+        self.profile_preset_combo = QComboBox()
+        self.profile_preset_combo.addItem('Custom Setup', userData=None)
+        for preset in PROFILE_PRESETS:
+            self.profile_preset_combo.addItem(preset['title'], userData=preset['key'])
+        self.profile_preset_combo.currentIndexChanged.connect(self._handle_preset_change)
+        selector_layout.addWidget(self.profile_preset_combo, 1)
+        self.apply_preset_button = QPushButton('Apply Preset')
+        self.apply_preset_button.clicked.connect(self._apply_selected_preset)
+        selector_layout.addWidget(self.apply_preset_button)
+        preset_layout.addLayout(selector_layout)
+        self.preset_description_label = QLabel()
+        self.preset_description_label.setWordWrap(True)
+        self.preset_description_label.setObjectName('profilePresetDescription')
+        preset_layout.addWidget(self.preset_description_label)
+        preset_group.setLayout(preset_layout)
+        layout.addWidget(preset_group)
         operations_group = QGroupBox('Field Operations')
         operations_form = QFormLayout()
         operations_form.setLabelAlignment(Qt.AlignRight)
@@ -251,6 +367,9 @@ class SettingsDialog(QDialog):
             self.temperature_units_combo.setCurrentIndex(index)
         for module_key, checkbox in self.module_checkboxes.items():
             checkbox.setChecked(self.settings.value(f'modules/{module_key}', True, bool))
+
+        stored_preset = self.settings.value('general/active_preset', '', str)
+        self._update_profile_selector(stored_preset or None)
     def save_settings(self):
         self.settings.setValue('general/call_sign', self.call_sign_edit.text().strip())
         self.settings.setValue('general/primary_region', self.primary_region_combo.currentText())
@@ -266,6 +385,14 @@ class SettingsDialog(QDialog):
         self.settings.setValue('display/temperature_units', self.temperature_units_combo.currentText())
         for module_key, checkbox in self.module_checkboxes.items():
             self.settings.setValue(f'modules/{module_key}', checkbox.isChecked())
+
+        current_settings = self._collect_settings_preview()
+        matching_preset = None
+        for preset in PROFILE_PRESETS:
+            if self._settings_match_preset(current_settings, preset):
+                matching_preset = preset['key']
+                break
+        self.settings.setValue('general/active_preset', matching_preset or '')
     def _collect_settings_preview(self) -> Dict[str, Any]:
         """Gather the current dialog state into a mapping for validation."""
 
@@ -286,6 +413,7 @@ class SettingsDialog(QDialog):
                 module_key: checkbox.isChecked()
                 for module_key, checkbox in self.module_checkboxes.items()
             },
+            'active_preset': self.profile_preset_combo.currentData() or '',
         }
 
     def _widget_for_field(self, field: str) -> Optional[QWidget]:
@@ -308,6 +436,121 @@ class SettingsDialog(QDialog):
         widget = self._widget_for_field(issue.field)
         if widget is not None:
             widget.setFocus()
+
+    def _update_profile_selector(self, preset_key: Optional[str]):
+        target_index = self.profile_preset_combo.findData(preset_key)
+        if target_index < 0:
+            target_index = self.profile_preset_combo.findData(None)
+        if target_index >= 0:
+            self.profile_preset_combo.setCurrentIndex(target_index)
+        self._handle_preset_change()
+
+    def _handle_preset_change(self):
+        key = self.profile_preset_combo.currentData()
+        preset = PROFILE_PRESET_MAP.get(key)
+        self.apply_preset_button.setEnabled(preset is not None)
+        if preset is None:
+            self.preset_description_label.setText(
+                'Fine-tune each field to craft a custom operator profile for this device.'
+            )
+        else:
+            self.preset_description_label.setText(preset['description'])
+
+    def _apply_selected_preset(self):
+        key = self.profile_preset_combo.currentData()
+        if key is None:
+            return
+        self._apply_profile_preset(key)
+
+    def _apply_profile_preset(self, preset_key: str):
+        preset = PROFILE_PRESET_MAP.get(preset_key)
+        if not preset:
+            return
+        self._suppress_profile_custom = True
+        try:
+            general = preset.get('general', {})
+            if 'primary_region' in general:
+                index = self.primary_region_combo.findText(general['primary_region'])
+                if index >= 0:
+                    self.primary_region_combo.setCurrentIndex(index)
+            if 'log_retention' in general:
+                self.log_retention_spin.setValue(int(general['log_retention']))
+            if 'auto_backup' in general:
+                self.auto_backup_checkbox.setChecked(bool(general['auto_backup']))
+            if 'prompt_before_sync' in general:
+                self.prompt_before_sync_checkbox.setChecked(bool(general['prompt_before_sync']))
+            if 'launch_on_start' in general:
+                self.launch_on_start_checkbox.setChecked(bool(general['launch_on_start']))
+            if 'show_tips' in general:
+                self.show_tips_checkbox.setChecked(bool(general['show_tips']))
+
+            display = preset.get('display', {})
+            if 'theme' in display:
+                index = self.theme_combo.findText(display['theme'])
+                if index >= 0:
+                    self.theme_combo.setCurrentIndex(index)
+            if 'font_scale' in display:
+                self.font_scale_spin.setValue(int(display['font_scale']))
+            if 'high_contrast' in display:
+                self.high_contrast_checkbox.setChecked(bool(display['high_contrast']))
+            if 'distance_units' in display:
+                index = self.distance_units_combo.findText(display['distance_units'])
+                if index >= 0:
+                    self.distance_units_combo.setCurrentIndex(index)
+            if 'temperature_units' in display:
+                index = self.temperature_units_combo.findText(display['temperature_units'])
+                if index >= 0:
+                    self.temperature_units_combo.setCurrentIndex(index)
+
+            modules = preset.get('modules', {})
+            for module_key, checkbox in self.module_checkboxes.items():
+                if module_key in modules:
+                    checkbox.setChecked(bool(modules[module_key]))
+        finally:
+            self._suppress_profile_custom = False
+        self._update_profile_selector(preset_key)
+
+    def _mark_custom_profile(self):
+        if self._suppress_profile_custom:
+            return
+        custom_index = self.profile_preset_combo.findData(None)
+        if custom_index >= 0 and self.profile_preset_combo.currentIndex() != custom_index:
+            self.profile_preset_combo.setCurrentIndex(custom_index)
+
+    def _connect_profile_watchers(self):
+        watchers = [
+            self.primary_region_combo.currentIndexChanged,
+            self.log_retention_spin.valueChanged,
+            self.auto_backup_checkbox.toggled,
+            self.prompt_before_sync_checkbox.toggled,
+            self.launch_on_start_checkbox.toggled,
+            self.show_tips_checkbox.toggled,
+            self.theme_combo.currentIndexChanged,
+            self.font_scale_spin.valueChanged,
+            self.high_contrast_checkbox.toggled,
+            self.distance_units_combo.currentIndexChanged,
+            self.temperature_units_combo.currentIndexChanged,
+        ]
+        for signal in watchers:
+            signal.connect(self._mark_custom_profile)
+        for checkbox in self.module_checkboxes.values():
+            checkbox.toggled.connect(self._mark_custom_profile)
+
+    def _settings_match_preset(self, current_settings: Dict[str, Any], preset: Dict[str, Any]) -> bool:
+        preset_general = preset.get('general', {})
+        for key, value in preset_general.items():
+            if current_settings.get(key) != value:
+                return False
+        preset_display = preset.get('display', {})
+        for key, value in preset_display.items():
+            if current_settings.get(key) != value:
+                return False
+        preset_modules = preset.get('modules', {})
+        current_modules = current_settings.get('modules', {})
+        for key, value in preset_modules.items():
+            if current_modules.get(key) != bool(value):
+                return False
+        return True
 
     def validate_inputs(self) -> bool:
         preview = self._collect_settings_preview()
