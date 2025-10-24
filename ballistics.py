@@ -4,6 +4,7 @@ Advanced ballistics calculations with environmental corrections, trajectory mode
 and comprehensive ammunition database for precision shooting applications.
 """
 import math
+import re
 import shutil
 from typing import Any, Dict, Iterable, List, Optional, Tuple, NamedTuple
 from dataclasses import dataclass, field
@@ -12,21 +13,11 @@ import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime, timezone
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
-    QTabWidget, QPushButton, QLabel, QLineEdit, QSpinBox, QDoubleSpinBox,
-    QComboBox, QTextEdit, QTableWidget, QTableWidgetItem, QGroupBox,
-    QScrollArea, QFrame, QSlider, QCheckBox, QProgressBar, QSplitter,
-    QHeaderView, QMessageBox, QFileDialog
-)
-from PySide6.QtCore import (
-    Qt, Signal, QTimer, QThread, QObject, QSettings
-)
-from PySide6.QtGui import QFont, QColor, QPainter, QPen
-from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
-from main import BaseModule
 from logger import get_logger, LoggableMixin
 from migrations import migrate_ballistic_profile_store, MigrationError
+from sensor_diagnostics import SensorDiagnosticSnapshot, SensorDiagnosticsEngine
+from simulated_devices import ensure_simulated_diagnostics_devices
+from device_manager import DeviceManager
 BALLISTIC_PROFILE_SCHEMA_VERSION = 1
 class DragModel(Enum):
     """Drag model types for ballistics calculations."""
@@ -157,6 +148,404 @@ class BallisticsResult:
         # Convert grains to kg and calculate kinetic energy
         mass_kg = self.ammunition.bullet_weight * 0.00006479891  # grains to kg
         return 0.5 * mass_kg * (self.ammunition.muzzle_velocity ** 2)
+
+
+@dataclass(frozen=True)
+class BallisticSuggestion:
+    """Actionable recommendation derived from sensor telemetry."""
+
+    focus: str
+    recommendation: str
+    justification: str
+    severity: str = "info"
+
+    def format_for_summary(self) -> str:
+        level = self.severity.upper()
+        return f"[{level}] {self.focus}: {self.recommendation}\n    {self.justification}"
+
+
+@dataclass
+class SensorTelemetry:
+    """Structured view of live sensor measurements."""
+
+    temperature: Optional[float] = None
+    pressure: Optional[float] = None
+    humidity: Optional[float] = None
+    wind_speed: Optional[float] = None
+    wind_direction: Optional[float] = None
+    range_offset: Optional[float] = None
+    inclination_drift: Optional[float] = None
+
+    def reset(self) -> None:
+        self.temperature = None
+        self.pressure = None
+        self.humidity = None
+        self.wind_speed = None
+        self.wind_direction = None
+        self.range_offset = None
+        self.inclination_drift = None
+
+    def has_environment_measurements(self) -> bool:
+        return any(
+            value is not None
+            for value in (
+                self.temperature,
+                self.pressure,
+                self.humidity,
+                self.wind_speed,
+                self.wind_direction,
+            )
+        )
+
+    def to_environment(self, baseline: EnvironmentalData) -> EnvironmentalData:
+        return EnvironmentalData(
+            temperature=self.temperature if self.temperature is not None else baseline.temperature,
+            pressure=self.pressure if self.pressure is not None else baseline.pressure,
+            humidity=self.humidity if self.humidity is not None else baseline.humidity,
+            altitude=baseline.altitude,
+            wind_speed=self.wind_speed if self.wind_speed is not None else baseline.wind_speed,
+            wind_direction=self.wind_direction if self.wind_direction is not None else baseline.wind_direction,
+        )
+
+
+class AdaptiveBallisticAdvisor(LoggableMixin):
+    """Produces adaptive ballistic suggestions using live sensor input."""
+
+    _SEVERITY_LEVELS = {"info": 0, "warning": 1, "critical": 2}
+    _TEMPERATURE_THRESHOLD = 2.0
+    _PRESSURE_THRESHOLD = 3.0
+    _HUMIDITY_THRESHOLD = 10.0
+    _DROP_DELTA_IMPORTANT = 1.0
+    _DROP_DELTA_WARNING = 5.0
+    _DEFAULT_ANALYSIS_DISTANCE = 400.0
+    _WIND_SPEED_MIN = 1.0
+    _WIND_SPEED_WARNING = 5.0
+    _RANGE_OFFSET_INFO = 0.3
+    _RANGE_OFFSET_WARNING = 0.5
+    _INCLINATION_WARNING = 0.5
+
+    def __init__(
+        self,
+        *,
+        calculator: Optional["BallisticsCalculator"] = None,
+        device_manager: Optional[DeviceManager] = None,
+        diagnostics_engine: Optional[SensorDiagnosticsEngine] = None,
+    ) -> None:
+        super().__init__()
+        self.calculator = calculator or BallisticsCalculator()
+        self.device_manager = device_manager
+        self.diagnostics_engine = diagnostics_engine
+        self._baseline_environment: Optional[EnvironmentalData] = None
+        self._telemetry = SensorTelemetry()
+        self._snapshots: List[SensorDiagnosticSnapshot] = []
+
+    def update_baseline_environment(self, environment: EnvironmentalData) -> None:
+        self._baseline_environment = environment
+
+    def clear_sensor_context(self) -> None:
+        self._telemetry.reset()
+        self._snapshots = []
+
+    def refresh_from_sensors(self) -> List[SensorDiagnosticSnapshot]:
+        if not self.device_manager or not self.diagnostics_engine:
+            return []
+
+        ensure_simulated_diagnostics_devices(self.device_manager)
+        self.clear_sensor_context()
+
+        snapshots: List[SensorDiagnosticSnapshot] = []
+        for device in self.device_manager.get_paired_devices():
+            snapshot = self.diagnostics_engine.compute_snapshot(device)
+            snapshots.append(snapshot)
+            self.ingest_sensor_snapshot(snapshot)
+        return snapshots
+
+    def ingest_sensor_snapshot(self, snapshot: SensorDiagnosticSnapshot) -> None:
+        self._snapshots.append(snapshot)
+        for metric in snapshot.metrics:
+            value = self._parse_metric_value(metric.value)
+            if value is None:
+                continue
+            label = metric.label.lower()
+            if "temperature" in label:
+                self._telemetry.temperature = value
+            elif "humidity" in label:
+                self._telemetry.humidity = value
+            elif "barometric" in label or "pressure" in label:
+                self._telemetry.pressure = value
+            elif "wind speed" in label:
+                self._telemetry.wind_speed = value
+            elif "wind direction" in label:
+                self._telemetry.wind_direction = value % 360
+            elif "range offset" in label:
+                self._telemetry.range_offset = value
+            elif "inclination" in label:
+                self._telemetry.inclination_drift = value
+
+    def generate_suggestions(self, result: "BallisticsResult") -> List[BallisticSuggestion]:
+        if result is None:
+            return []
+        if self._baseline_environment is None:
+            self._baseline_environment = result.environment
+
+        suggestions: List[BallisticSuggestion] = []
+        baseline_env = self._baseline_environment
+        adjusted_result: Optional[BallisticsResult] = None
+
+        if self._telemetry.has_environment_measurements():
+            adjusted_env = self._telemetry.to_environment(baseline_env)
+            adjusted_result = self._compute_adjusted_result(result, adjusted_env)
+            suggestions.extend(
+                self._environment_shift_suggestions(
+                    baseline_result=result,
+                    adjusted_result=adjusted_result,
+                    baseline_env=baseline_env,
+                    adjusted_env=adjusted_env,
+                )
+            )
+            suggestions.extend(
+                self._wind_suggestions(adjusted_result, telemetry=self._telemetry)
+            )
+        else:
+            adjusted_result = result
+
+        suggestions.extend(self._rangefinder_suggestions(self._telemetry))
+        suggestions.extend(self._inclination_suggestions(self._telemetry))
+
+        return suggestions
+
+    def _compute_adjusted_result(
+        self,
+        baseline_result: "BallisticsResult",
+        environment: EnvironmentalData,
+    ) -> "BallisticsResult":
+        if baseline_result.environment.to_dict() == environment.to_dict():
+            return baseline_result
+        max_range = (
+            baseline_result.trajectory[-1].distance
+            if baseline_result.trajectory
+            else baseline_result.zero_distance
+        )
+        return self.calculator.calculate_trajectory(
+            ammo=baseline_result.ammunition,
+            environment=environment,
+            zero_distance=baseline_result.zero_distance,
+            max_range=max_range,
+            vital_zone_diameter=baseline_result.vital_zone_diameter,
+        )
+
+    def _environment_shift_suggestions(
+        self,
+        *,
+        baseline_result: "BallisticsResult",
+        adjusted_result: "BallisticsResult",
+        baseline_env: EnvironmentalData,
+        adjusted_env: EnvironmentalData,
+    ) -> List[BallisticSuggestion]:
+        deltas: List[str] = []
+        severity = "info"
+
+        temp_delta = self._delta(self._telemetry.temperature, baseline_env.temperature)
+        if temp_delta is not None and abs(temp_delta) >= self._TEMPERATURE_THRESHOLD:
+            severity = self._max_severity(severity, "warning" if abs(temp_delta) >= 6 else "info")
+            deltas.append(
+                f"temperature {adjusted_env.temperature:.1f}Â°C (profile {baseline_env.temperature:.1f}Â°C)"
+            )
+
+        pressure_delta = self._delta(self._telemetry.pressure, baseline_env.pressure)
+        if pressure_delta is not None and abs(pressure_delta) >= self._PRESSURE_THRESHOLD:
+            deltas.append(
+                f"pressure {adjusted_env.pressure:.1f} hPa (profile {baseline_env.pressure:.1f} hPa)"
+            )
+
+        humidity_delta = self._delta(self._telemetry.humidity, baseline_env.humidity)
+        if humidity_delta is not None and abs(humidity_delta) >= self._HUMIDITY_THRESHOLD:
+            deltas.append(
+                f"humidity {adjusted_env.humidity:.0f}% (profile {baseline_env.humidity:.0f}%)"
+            )
+
+        if not deltas:
+            return []
+
+        analysis_point = self._point_at_distance(
+            adjusted_result,
+            min(
+                self._DEFAULT_ANALYSIS_DISTANCE,
+                adjusted_result.trajectory[-1].distance if adjusted_result.trajectory else 0.0,
+            ),
+        )
+        baseline_point = self._point_at_distance(
+            baseline_result,
+            analysis_point.distance if analysis_point else 0.0,
+        )
+
+        if not analysis_point or not baseline_point or analysis_point.distance <= 0:
+            shift_statement = "Live environment differs from stored profile settings."
+            drop_delta_cm = 0.0
+        else:
+            drop_delta_cm = (analysis_point.drop - baseline_point.drop) * 100.0
+            if abs(drop_delta_cm) >= self._DROP_DELTA_WARNING:
+                severity = self._max_severity(severity, "warning")
+            direction = "lower" if drop_delta_cm < 0 else "higher"
+            shift_statement = (
+                f"Drop shifts {abs(drop_delta_cm):.1f} cm {direction} at {analysis_point.distance:.0f} m."
+            )
+
+        recommendation = "Refresh trajectory using live sensor readings."
+        justification = f"Adjust for {', '.join(deltas)}; {shift_statement}"
+        return [
+            BallisticSuggestion(
+                focus="Environment",
+                recommendation=recommendation,
+                justification=justification,
+                severity=severity,
+            )
+        ]
+
+    def _wind_suggestions(
+        self,
+        result: "BallisticsResult",
+        *,
+        telemetry: SensorTelemetry,
+    ) -> List[BallisticSuggestion]:
+        if not telemetry.wind_speed or not result.trajectory:
+            return []
+
+        target_distance = min(
+            self._DEFAULT_ANALYSIS_DISTANCE,
+            result.trajectory[-1].distance,
+        )
+        point = self._point_at_distance(result, target_distance)
+        if point is None or point.distance <= 0:
+            return []
+
+        windage_moa = self._moa(point.windage, point.distance)
+        if abs(windage_moa) < 0.1:
+            return []
+
+        severity = "warning" if telemetry.wind_speed >= self._WIND_SPEED_WARNING else "info"
+        direction = "right" if windage_moa > 0 else "left"
+        drift_cm = abs(point.windage * 100.0)
+        if telemetry.wind_direction is not None:
+            wind_descriptor = f"{telemetry.wind_speed:.1f} m/s @ {telemetry.wind_direction:.0f}Â°"
+        else:
+            wind_descriptor = f"{telemetry.wind_speed:.1f} m/s"
+        justification = (
+            f"Weather meter reports {wind_descriptor}; expect {drift_cm:.1f} cm drift at {point.distance:.0f} m."
+        )
+        recommendation = (
+            f"Dial {abs(windage_moa):.1f} MOA {direction} for {point.distance:.0f} m shots."
+        )
+        return [
+            BallisticSuggestion(
+                focus="Crosswind",
+                recommendation=recommendation,
+                justification=justification,
+                severity=severity,
+            )
+        ]
+
+    def _rangefinder_suggestions(self, telemetry: SensorTelemetry) -> List[BallisticSuggestion]:
+        offset = telemetry.range_offset
+        if offset is None or abs(offset) < self._RANGE_OFFSET_INFO:
+            return []
+        severity = "warning" if abs(offset) >= self._RANGE_OFFSET_WARNING else "info"
+        direction = "long" if offset > 0 else "short"
+        recommendation = (
+            f"Validate rangefinder zero; live check is {abs(offset):.1f} yd {direction} of benchmark."
+        )
+        justification = "Rangefinder diagnostics detected a measurable offset."
+        return [
+            BallisticSuggestion(
+                focus="Range Calibration",
+                recommendation=recommendation,
+                justification=justification,
+                severity=severity,
+            )
+        ]
+
+    def _inclination_suggestions(self, telemetry: SensorTelemetry) -> List[BallisticSuggestion]:
+        drift = telemetry.inclination_drift
+        if drift is None or abs(drift) < self._INCLINATION_WARNING:
+            return []
+        recommendation = "Level the rifle or recalibrate inclinometer before the next shot."
+        justification = f"Inclination drift of {drift:+.2f}Â° exceeds the {self._INCLINATION_WARNING:.1f}Â° tolerance."
+        return [
+            BallisticSuggestion(
+                focus="Cant Error",
+                recommendation=recommendation,
+                justification=justification,
+                severity="warning",
+            )
+        ]
+
+    @staticmethod
+    def _parse_metric_value(raw_value: str) -> Optional[float]:
+        if not raw_value:
+            return None
+        cleaned = raw_value.replace("Â", "").replace(",", ".")
+        cleaned = cleaned.replace("±", "")
+        match = re.search(r"([+-]?\d+(?:\.\d+)?)", cleaned)
+        if not match:
+            return None
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+
+    @classmethod
+    def _max_severity(cls, first: str, second: str) -> str:
+        return first if cls._SEVERITY_LEVELS[first] >= cls._SEVERITY_LEVELS[second] else second
+
+    @staticmethod
+    def _delta(sensor_value: Optional[float], baseline_value: float) -> Optional[float]:
+        if sensor_value is None:
+            return None
+        return sensor_value - baseline_value
+
+    @staticmethod
+    def _point_at_distance(result: "BallisticsResult", distance: float) -> Optional[TrajectoryPoint]:
+        if not result.trajectory:
+            return None
+        return min(result.trajectory, key=lambda point: abs(point.distance - distance))
+
+    @staticmethod
+    def _moa(offset_m: float, distance_m: float) -> float:
+        if distance_m == 0:
+            return 0.0
+        return (offset_m / distance_m) * 3437.75
+
+
+try:  # pragma: no cover - optional Qt dependency
+    from PySide6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
+        QTabWidget, QPushButton, QLabel, QLineEdit, QSpinBox, QDoubleSpinBox,
+        QComboBox, QTextEdit, QTableWidget, QTableWidgetItem, QGroupBox,
+        QScrollArea, QFrame, QSlider, QCheckBox, QProgressBar, QSplitter,
+        QHeaderView, QMessageBox, QFileDialog
+    )
+    from PySide6.QtCore import (
+        Qt, Signal, QTimer, QThread, QObject, QSettings
+    )
+    from PySide6.QtGui import QFont, QColor, QPainter, QPen
+    from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
+    from main import BaseModule
+    _QT_AVAILABLE = True
+except ImportError:  # pragma: no cover - executed when Qt bindings missing
+    import sys
+    for _module_name in list(sys.modules):
+        if _module_name.startswith("PySide6"):
+            sys.modules.pop(_module_name, None)
+    QWidget = QVBoxLayout = QHBoxLayout = QFormLayout = QGridLayout = None  # type: ignore
+    QTabWidget = QPushButton = QLabel = QLineEdit = QSpinBox = QDoubleSpinBox = None  # type: ignore
+    QComboBox = QTextEdit = QTableWidget = QTableWidgetItem = QGroupBox = None  # type: ignore
+    QScrollArea = QFrame = QSlider = QCheckBox = QProgressBar = QSplitter = None  # type: ignore
+    QHeaderView = QMessageBox = QFileDialog = None  # type: ignore
+    Qt = Signal = QTimer = QThread = QObject = QSettings = None  # type: ignore
+    QFont = QColor = QPainter = QPen = None  # type: ignore
+    QChart = QChartView = QLineSeries = QValueAxis = None  # type: ignore
+    BaseModule = object  # type: ignore[assignment]
+    _QT_AVAILABLE = False
 @dataclass
 class BallisticProfile:
     """Serialized snapshot capturing a complete ballistic setup."""
@@ -626,877 +1015,919 @@ class BallisticProfileStorage(LoggableMixin):
             shutil.copy2(self.storage_file, corrupted_path)
         except OSError as exc:
             self.log_warning("Failed to preserve corrupted ballistic profile store", exception=exc)
-class BallisticsModule(BaseModule):
-    """Main ballistics calculator module for Hunt Pro."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.calculator = BallisticsCalculator()
-        self.ammo_db = AmmunitionDatabase()
-        self.profile_storage = BallisticProfileStorage()
-        self.current_result: Optional[BallisticsResult] = None
-        self.setup_ui()
-        self.load_settings()
-        self.log_info("Ballistics module initialized")
-    def setup_ui(self):
-        """Setup the ballistics calculator interface."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        # Create main splitter
-        splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(splitter)
-        # Left panel - inputs
-        left_panel = self.create_input_panel()
-        splitter.addWidget(left_panel)
-        # Right panel - results
-        right_panel = self.create_results_panel()
-        splitter.addWidget(right_panel)
-        # Set splitter proportions
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
-        # Apply styling
-        self.apply_styling()
-    def create_input_panel(self) -> QWidget:
-        """Create the input panel with ammunition and environmental settings."""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        # Create scroll area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
-        # Ammunition selection group
-        ammo_group = QGroupBox("ðŸŽ¯ Ammunition Selection")
-        ammo_layout = QFormLayout()
-        self.caliber_combo = QComboBox()
-        self.caliber_combo.addItems(["Custom"] + self.ammo_db.get_all_calibers())
-        self.caliber_combo.currentTextChanged.connect(self.on_caliber_changed)
-        ammo_layout.addRow("Caliber:", self.caliber_combo)
-        self.ammo_combo = QComboBox()
-        self.ammo_combo.currentIndexChanged.connect(self.on_ammunition_changed)
-        ammo_layout.addRow("Ammunition:", self.ammo_combo)
-        ammo_group.setLayout(ammo_layout)
-        scroll_layout.addWidget(ammo_group)
-        # Custom ammunition group
-        self.custom_ammo_group = QGroupBox("âš™ï¸ Custom Ammunition")
-        custom_layout = QFormLayout()
-        self.bullet_weight_spin = QDoubleSpinBox()
-        self.bullet_weight_spin.setRange(20, 1000)
-        self.bullet_weight_spin.setValue(150)
-        self.bullet_weight_spin.setSuffix(" gr")
-        custom_layout.addRow("Bullet Weight:", self.bullet_weight_spin)
-        self.muzzle_velocity_spin = QDoubleSpinBox()
-        self.muzzle_velocity_spin.setRange(200, 1500)
-        self.muzzle_velocity_spin.setValue(800)
-        self.muzzle_velocity_spin.setSuffix(" m/s")
-        custom_layout.addRow("Muzzle Velocity:", self.muzzle_velocity_spin)
-        self.ballistic_coefficient_spin = QDoubleSpinBox()
-        self.ballistic_coefficient_spin.setRange(0.1, 1.0)
-        self.ballistic_coefficient_spin.setValue(0.4)
-        self.ballistic_coefficient_spin.setDecimals(3)
-        custom_layout.addRow("Ballistic Coefficient:", self.ballistic_coefficient_spin)
-        self.drag_model_combo = QComboBox()
-        for model in DragModel:
-            self.drag_model_combo.addItem(model.value, model)
-        custom_layout.addRow("Drag Model:", self.drag_model_combo)
-        self.custom_ammo_group.setLayout(custom_layout)
-        scroll_layout.addWidget(self.custom_ammo_group)
-        # Environmental conditions group
-        env_group = QGroupBox("ðŸŒ¤ï¸ Environmental Conditions")
-        env_layout = QFormLayout()
-        self.temperature_spin = QSpinBox()
-        self.temperature_spin.setRange(-40, 60)
-        self.temperature_spin.setValue(15)
-        self.temperature_spin.setSuffix("Â°C")
-        env_layout.addRow("Temperature:", self.temperature_spin)
-        self.pressure_spin = QDoubleSpinBox()
-        self.pressure_spin.setRange(800, 1100)
-        self.pressure_spin.setValue(1013.25)
-        self.pressure_spin.setSuffix(" hPa")
-        env_layout.addRow("Barometric Pressure:", self.pressure_spin)
-        self.humidity_spin = QSpinBox()
-        self.humidity_spin.setRange(0, 100)
-        self.humidity_spin.setValue(50)
-        self.humidity_spin.setSuffix("%")
-        env_layout.addRow("Humidity:", self.humidity_spin)
-        self.altitude_spin = QSpinBox()
-        self.altitude_spin.setRange(0, 8000)
-        self.altitude_spin.setValue(0)
-        self.altitude_spin.setSuffix(" m")
-        env_layout.addRow("Altitude:", self.altitude_spin)
-        # Wind conditions
-        wind_layout = QHBoxLayout()
-        self.wind_speed_spin = QDoubleSpinBox()
-        self.wind_speed_spin.setRange(0, 50)
-        self.wind_speed_spin.setValue(0)
-        self.wind_speed_spin.setSuffix(" m/s")
-        wind_layout.addWidget(self.wind_speed_spin)
-        self.wind_direction_spin = QSpinBox()
-        self.wind_direction_spin.setRange(0, 360)
-        self.wind_direction_spin.setValue(90)
-        self.wind_direction_spin.setSuffix("Â°")
-        wind_layout.addWidget(QLabel("@"))
-        wind_layout.addWidget(self.wind_direction_spin)
-        env_layout.addRow("Wind Speed:", wind_layout)
-        env_group.setLayout(env_layout)
-        scroll_layout.addWidget(env_group)
-        # Calculation parameters group
-        calc_group = QGroupBox("ðŸ“ Calculation Parameters")
-        calc_layout = QFormLayout()
-        self.zero_distance_spin = QSpinBox()
-        self.zero_distance_spin.setRange(25, 500)
-        self.zero_distance_spin.setValue(100)
-        self.zero_distance_spin.setSuffix(" m")
-        calc_layout.addRow("Zero Distance:", self.zero_distance_spin)
-        self.max_range_spin = QSpinBox()
-        self.max_range_spin.setRange(100, 2000)
-        self.max_range_spin.setValue(800)
-        self.max_range_spin.setSuffix(" m")
-        calc_layout.addRow("Maximum Range:", self.max_range_spin)
-        self.vital_zone_spin = QDoubleSpinBox()
-        self.vital_zone_spin.setRange(0.1, 0.5)
-        self.vital_zone_spin.setValue(0.2)
-        self.vital_zone_spin.setSuffix(" m")
-        self.vital_zone_spin.setDecimals(2)
-        calc_layout.addRow("Vital Zone Diameter:", self.vital_zone_spin)
-        calc_group.setLayout(calc_layout)
-        scroll_layout.addWidget(calc_group)
-        # Calculate button
-        self.calculate_btn = QPushButton("ðŸ§® Calculate Trajectory")
-        self.calculate_btn.setObjectName("primary")
-        self.calculate_btn.setMinimumHeight(50)
-        self.calculate_btn.clicked.connect(self.calculate_ballistics)
-        scroll_layout.addWidget(self.calculate_btn)
-        scroll_layout.addStretch()
-        scroll.setWidget(scroll_widget)
-        layout.addWidget(scroll)
-        return panel
-    def create_results_panel(self) -> QWidget:
-        """Create the results panel with charts and tables."""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        # Results tab widget
-        self.results_tabs = QTabWidget()
-        layout.addWidget(self.results_tabs)
-        # Trajectory chart tab
-        self.chart_view = QChartView()
-        self.results_tabs.addTab(self.chart_view, "ðŸ“ˆ Trajectory Chart")
-        # Data table tab
-        self.create_data_table_tab()
-        # Come-ups tab
-        self.create_comeups_tab()
-        # Summary tab
-        self.create_summary_tab()
-        # Export controls
-        export_group = QGroupBox("ðŸ“¼ Export Trajectory")
-        export_layout = QHBoxLayout(export_group)
-        export_layout.addWidget(QLabel("Format:"))
-        self.export_format_combo = QComboBox()
-        self.export_format_combo.addItems(["CSV", "JSON", "KML"])
-        export_layout.addWidget(self.export_format_combo)
-        export_layout.addStretch()
-        self.export_results_btn = QPushButton("ðŸ’¾ Export Results")
-        self.export_results_btn.clicked.connect(self.prompt_export_results)
-        self.export_results_btn.setEnabled(False)
-        export_layout.addWidget(self.export_results_btn)
-        layout.addWidget(export_group)
-        return panel
-    def create_data_table_tab(self):
-        """Create trajectory data table tab."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        self.data_table = QTableWidget()
-        headers = ["Distance (m)", "Drop (cm)", "Velocity (m/s)", "Energy (J)", "Time (s)", "Wind Drift (cm)"]
-        self.data_table.setColumnCount(len(headers))
-        self.data_table.setHorizontalHeaderLabels(headers)
-        # Set column properties
-        header = self.data_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        layout.addWidget(self.data_table)
-        self.results_tabs.addTab(tab, "ðŸ“Š Data Table")
-    def create_comeups_tab(self):
-        """Create scope adjustments (come-ups) tab."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        # Distance selection
-        distances_layout = QHBoxLayout()
-        distances_layout.addWidget(QLabel("Calculate come-ups for distances:"))
-        self.comeup_distances_edit = QLineEdit("100, 200, 300, 400, 500")
-        self.comeup_distances_edit.setPlaceholderText("Enter distances separated by commas")
-        distances_layout.addWidget(self.comeup_distances_edit)
-        calc_comeups_btn = QPushButton("Calculate")
-        calc_comeups_btn.clicked.connect(self.calculate_comeups)
-        distances_layout.addWidget(calc_comeups_btn)
-        layout.addLayout(distances_layout)
-        # Come-ups table
-        self.comeups_table = QTableWidget()
-        comeup_headers = ["Distance (m)", "Elevation (MOA)", "Windage (MOA)", 
-                         "Elev. Clicks", "Wind Clicks", "Velocity (m/s)", "Energy (J)", "Time (s)"]
-        self.comeups_table.setColumnCount(len(comeup_headers))
-        self.comeups_table.setHorizontalHeaderLabels(comeup_headers)
-        header = self.comeups_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        layout.addWidget(self.comeups_table)
-        self.results_tabs.addTab(tab, "ðŸŽ¯ Come-Ups")
-    def create_summary_tab(self):
-        """Create ballistics summary tab."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        self.summary_text = QTextEdit()
-        self.summary_text.setReadOnly(True)
-        self.summary_text.setFont(QFont("monospace", 10))
-        layout.addWidget(self.summary_text)
-        self.results_tabs.addTab(tab, "ðŸ“‹ Summary")
+if _QT_AVAILABLE:
 
-    def prompt_export_results(self):
-        """Prompt the user to export current trajectory results."""
-        if not self.current_result:
-            QMessageBox.information(self, "No Results", "Please calculate a trajectory before exporting.")
-            return
-        format_type = self.export_format_combo.currentText()
-        ammo_name = self.current_result.ammunition.name if self.current_result.ammunition else "trajectory"
-        safe_stem = ''.join(ch if ch.isalnum() else '_' for ch in ammo_name).strip('_') or 'trajectory'
-        default_name = f"{safe_stem.lower()}_{datetime.now().strftime('%Y%m%d')}.{format_type.lower()}"
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            f"Export Ballistics as {format_type}",
-            default_name,
-            f"{format_type} Files (*.{format_type.lower()})"
-        )
-        if not file_path:
-            return
-        try:
-            self.export_results(file_path, format_type)
-            self.status_message.emit(f"Exported trajectory to {Path(file_path).name}")
-        except Exception as exc:
-            self.log_error("Failed to export ballistics results", exception=exc)
-            QMessageBox.critical(self, "Export Error", f"Failed to export results: {str(exc)}")
-    def apply_styling(self):
-        """Apply styling to the ballistics module."""
-        style = """
-        QGroupBox {
-            font-size: 14px;
-            font-weight: bold;
-            margin-top: 15px;
-            padding-top: 8px;
-            border: 2px solid #3d5a8c;
-            border-radius: 8px;
-            background-color: #f8f9fa;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            padding: 0 8px;
-            color: #2c5aa0;
-        }
-        QPushButton#primary {
-            background-color: #2c5aa0;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            padding: 15px;
-        }
-        QPushButton#primary:hover {
-            background-color: #3d6bb0;
-        }
-        QSpinBox, QDoubleSpinBox, QComboBox {
-            min-height: 35px;
-            font-size: 14px;
-        }
-        QTableWidget {
-            gridline-color: #dee2e6;
-            background-color: white;
-            alternate-background-color: #f8f9fa;
-        }
-        QHeaderView::section {
-            background-color: #e9ecef;
-            padding: 8px;
-            border: none;
-            font-weight: bold;
-        }
-        """
-        self.setStyleSheet(style)
-    def on_caliber_changed(self, caliber: str):
-        """Handle caliber selection change."""
-        self.ammo_combo.clear()
-        if caliber == "Custom":
-            self.custom_ammo_group.setVisible(True)
-            self.ammo_combo.addItem("Custom Ammunition")
-        else:
-            self.custom_ammo_group.setVisible(False)
-            ammo_list = self.ammo_db.get_by_caliber(caliber)
-            for ammo in ammo_list:
-                self.ammo_combo.addItem(ammo.name, ammo)
-    def on_ammunition_changed(self, index: int):
-        """Handle ammunition selection change."""
-        if self.caliber_combo.currentText() != "Custom" and index >= 0:
-            ammo = self.ammo_combo.itemData(index)
-            if ammo:
-                self.bullet_weight_spin.setValue(ammo.bullet_weight)
-                self.muzzle_velocity_spin.setValue(ammo.muzzle_velocity)
-                self.ballistic_coefficient_spin.setValue(ammo.ballistic_coefficient)
-                # Set drag model
-                for i in range(self.drag_model_combo.count()):
-                    if self.drag_model_combo.itemData(i) == ammo.drag_model:
-                        self.drag_model_combo.setCurrentIndex(i)
-                        break
-    def _get_active_ammunition(self) -> Ammunition:
-        """Return a copy of the currently configured ammunition."""
-        if self.caliber_combo.currentText() == "Custom":
-            drag_model = self.drag_model_combo.currentData()
-            if not isinstance(drag_model, DragModel):
-                drag_model = DragModel.G1
-            return Ammunition(
-                name="Custom",
-                caliber="Custom",
-                bullet_weight=self.bullet_weight_spin.value(),
-                muzzle_velocity=self.muzzle_velocity_spin.value(),
-                ballistic_coefficient=self.ballistic_coefficient_spin.value(),
-                drag_model=drag_model,
+    class BallisticsModule(BaseModule):
+        """Main ballistics calculator module for Hunt Pro."""
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.calculator = BallisticsCalculator()
+            self.device_manager = DeviceManager(auto_load_plugins=True)
+            self.sensor_engine = SensorDiagnosticsEngine()
+            self.adaptive_advisor = AdaptiveBallisticAdvisor(
+                calculator=self.calculator,
+                device_manager=self.device_manager,
+                diagnostics_engine=self.sensor_engine,
             )
-        ammo = self.ammo_combo.currentData()
-        if not isinstance(ammo, Ammunition):
-            raise ValueError("No ammunition selected for ballistic profile")
-        return Ammunition.from_dict(ammo.to_dict())
-    def _apply_custom_ammunition(self, ammo: Ammunition) -> None:
-        """Apply a custom ammunition configuration to the UI."""
-        if self.caliber_combo.findText("Custom") >= 0:
-            self.caliber_combo.setCurrentText("Custom")
-        self.custom_ammo_group.setVisible(True)
-        self.bullet_weight_spin.setValue(ammo.bullet_weight)
-        self.muzzle_velocity_spin.setValue(ammo.muzzle_velocity)
-        self.ballistic_coefficient_spin.setValue(ammo.ballistic_coefficient)
-        drag_index = self.drag_model_combo.findData(ammo.drag_model)
-        if drag_index >= 0:
-            self.drag_model_combo.setCurrentIndex(drag_index)
-    def _apply_ammunition_to_ui(self, ammo: Ammunition) -> None:
-        """Populate UI widgets with the provided ammunition selection."""
-        caliber_index = self.caliber_combo.findText(ammo.caliber)
-        if caliber_index == -1 or ammo.caliber == "Custom":
-            self._apply_custom_ammunition(ammo)
-            return
-        self.caliber_combo.setCurrentIndex(caliber_index)
-        # Ensure ammunition list reflects the caliber before selection
-        self.on_caliber_changed(ammo.caliber)
-        for idx in range(self.ammo_combo.count()):
-            item_data = self.ammo_combo.itemData(idx)
-            if isinstance(item_data, Ammunition) and item_data.name == ammo.name:
-                self.ammo_combo.setCurrentIndex(idx)
-                break
-        else:
-            self._apply_custom_ammunition(ammo)
-    def calculate_ballistics(self):
-        """Calculate ballistics trajectory."""
-        try:
-            # Create ammunition object
+            self._adaptive_suggestions: List[BallisticSuggestion] = []
+            self.ammo_db = AmmunitionDatabase()
+            self.profile_storage = BallisticProfileStorage()
+            self.current_result: Optional[BallisticsResult] = None
+            self.setup_ui()
+            self.load_settings()
+            self.log_info("Ballistics module initialized")
+
+        def setup_ui(self):
+            """Setup the ballistics calculator interface."""
+            layout = QVBoxLayout(self)
+            layout.setContentsMargins(10, 10, 10, 10)
+            # Create main splitter
+            splitter = QSplitter(Qt.Horizontal)
+            layout.addWidget(splitter)
+            # Left panel - inputs
+            left_panel = self.create_input_panel()
+            splitter.addWidget(left_panel)
+            # Right panel - results
+            right_panel = self.create_results_panel()
+            splitter.addWidget(right_panel)
+            # Set splitter proportions
+            splitter.setStretchFactor(0, 1)
+            splitter.setStretchFactor(1, 2)
+            # Apply styling
+            self.apply_styling()
+        def create_input_panel(self) -> QWidget:
+            """Create the input panel with ammunition and environmental settings."""
+            panel = QWidget()
+            layout = QVBoxLayout(panel)
+            # Create scroll area
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            scroll_widget = QWidget()
+            scroll_layout = QVBoxLayout(scroll_widget)
+            # Ammunition selection group
+            ammo_group = QGroupBox("ðŸŽ¯ Ammunition Selection")
+            ammo_layout = QFormLayout()
+            self.caliber_combo = QComboBox()
+            self.caliber_combo.addItems(["Custom"] + self.ammo_db.get_all_calibers())
+            self.caliber_combo.currentTextChanged.connect(self.on_caliber_changed)
+            ammo_layout.addRow("Caliber:", self.caliber_combo)
+            self.ammo_combo = QComboBox()
+            self.ammo_combo.currentIndexChanged.connect(self.on_ammunition_changed)
+            ammo_layout.addRow("Ammunition:", self.ammo_combo)
+            ammo_group.setLayout(ammo_layout)
+            scroll_layout.addWidget(ammo_group)
+            # Custom ammunition group
+            self.custom_ammo_group = QGroupBox("âš™ï¸ Custom Ammunition")
+            custom_layout = QFormLayout()
+            self.bullet_weight_spin = QDoubleSpinBox()
+            self.bullet_weight_spin.setRange(20, 1000)
+            self.bullet_weight_spin.setValue(150)
+            self.bullet_weight_spin.setSuffix(" gr")
+            custom_layout.addRow("Bullet Weight:", self.bullet_weight_spin)
+            self.muzzle_velocity_spin = QDoubleSpinBox()
+            self.muzzle_velocity_spin.setRange(200, 1500)
+            self.muzzle_velocity_spin.setValue(800)
+            self.muzzle_velocity_spin.setSuffix(" m/s")
+            custom_layout.addRow("Muzzle Velocity:", self.muzzle_velocity_spin)
+            self.ballistic_coefficient_spin = QDoubleSpinBox()
+            self.ballistic_coefficient_spin.setRange(0.1, 1.0)
+            self.ballistic_coefficient_spin.setValue(0.4)
+            self.ballistic_coefficient_spin.setDecimals(3)
+            custom_layout.addRow("Ballistic Coefficient:", self.ballistic_coefficient_spin)
+            self.drag_model_combo = QComboBox()
+            for model in DragModel:
+                self.drag_model_combo.addItem(model.value, model)
+            custom_layout.addRow("Drag Model:", self.drag_model_combo)
+            self.custom_ammo_group.setLayout(custom_layout)
+            scroll_layout.addWidget(self.custom_ammo_group)
+            # Environmental conditions group
+            env_group = QGroupBox("ðŸŒ¤ï¸ Environmental Conditions")
+            env_layout = QFormLayout()
+            self.temperature_spin = QSpinBox()
+            self.temperature_spin.setRange(-40, 60)
+            self.temperature_spin.setValue(15)
+            self.temperature_spin.setSuffix("Â°C")
+            env_layout.addRow("Temperature:", self.temperature_spin)
+            self.pressure_spin = QDoubleSpinBox()
+            self.pressure_spin.setRange(800, 1100)
+            self.pressure_spin.setValue(1013.25)
+            self.pressure_spin.setSuffix(" hPa")
+            env_layout.addRow("Barometric Pressure:", self.pressure_spin)
+            self.humidity_spin = QSpinBox()
+            self.humidity_spin.setRange(0, 100)
+            self.humidity_spin.setValue(50)
+            self.humidity_spin.setSuffix("%")
+            env_layout.addRow("Humidity:", self.humidity_spin)
+            self.altitude_spin = QSpinBox()
+            self.altitude_spin.setRange(0, 8000)
+            self.altitude_spin.setValue(0)
+            self.altitude_spin.setSuffix(" m")
+            env_layout.addRow("Altitude:", self.altitude_spin)
+            # Wind conditions
+            wind_layout = QHBoxLayout()
+            self.wind_speed_spin = QDoubleSpinBox()
+            self.wind_speed_spin.setRange(0, 50)
+            self.wind_speed_spin.setValue(0)
+            self.wind_speed_spin.setSuffix(" m/s")
+            wind_layout.addWidget(self.wind_speed_spin)
+            self.wind_direction_spin = QSpinBox()
+            self.wind_direction_spin.setRange(0, 360)
+            self.wind_direction_spin.setValue(90)
+            self.wind_direction_spin.setSuffix("Â°")
+            wind_layout.addWidget(QLabel("@"))
+            wind_layout.addWidget(self.wind_direction_spin)
+            env_layout.addRow("Wind Speed:", wind_layout)
+            env_group.setLayout(env_layout)
+            scroll_layout.addWidget(env_group)
+            # Calculation parameters group
+            calc_group = QGroupBox("ðŸ“ Calculation Parameters")
+            calc_layout = QFormLayout()
+            self.zero_distance_spin = QSpinBox()
+            self.zero_distance_spin.setRange(25, 500)
+            self.zero_distance_spin.setValue(100)
+            self.zero_distance_spin.setSuffix(" m")
+            calc_layout.addRow("Zero Distance:", self.zero_distance_spin)
+            self.max_range_spin = QSpinBox()
+            self.max_range_spin.setRange(100, 2000)
+            self.max_range_spin.setValue(800)
+            self.max_range_spin.setSuffix(" m")
+            calc_layout.addRow("Maximum Range:", self.max_range_spin)
+            self.vital_zone_spin = QDoubleSpinBox()
+            self.vital_zone_spin.setRange(0.1, 0.5)
+            self.vital_zone_spin.setValue(0.2)
+            self.vital_zone_spin.setSuffix(" m")
+            self.vital_zone_spin.setDecimals(2)
+            calc_layout.addRow("Vital Zone Diameter:", self.vital_zone_spin)
+            calc_group.setLayout(calc_layout)
+            scroll_layout.addWidget(calc_group)
+            # Calculate button
+            self.calculate_btn = QPushButton("ðŸ§® Calculate Trajectory")
+            self.calculate_btn.setObjectName("primary")
+            self.calculate_btn.setMinimumHeight(50)
+            self.calculate_btn.clicked.connect(self.calculate_ballistics)
+            scroll_layout.addWidget(self.calculate_btn)
+            scroll_layout.addStretch()
+            scroll.setWidget(scroll_widget)
+            layout.addWidget(scroll)
+            return panel
+        def create_results_panel(self) -> QWidget:
+            """Create the results panel with charts and tables."""
+            panel = QWidget()
+            layout = QVBoxLayout(panel)
+            # Results tab widget
+            self.results_tabs = QTabWidget()
+            layout.addWidget(self.results_tabs)
+            # Trajectory chart tab
+            self.chart_view = QChartView()
+            self.results_tabs.addTab(self.chart_view, "ðŸ“ˆ Trajectory Chart")
+            # Data table tab
+            self.create_data_table_tab()
+            # Come-ups tab
+            self.create_comeups_tab()
+            # Summary tab
+            self.create_summary_tab()
+            # Export controls
+            export_group = QGroupBox("ðŸ“¼ Export Trajectory")
+            export_layout = QHBoxLayout(export_group)
+            export_layout.addWidget(QLabel("Format:"))
+            self.export_format_combo = QComboBox()
+            self.export_format_combo.addItems(["CSV", "JSON", "KML"])
+            export_layout.addWidget(self.export_format_combo)
+            export_layout.addStretch()
+            self.export_results_btn = QPushButton("ðŸ’¾ Export Results")
+            self.export_results_btn.clicked.connect(self.prompt_export_results)
+            self.export_results_btn.setEnabled(False)
+            export_layout.addWidget(self.export_results_btn)
+            layout.addWidget(export_group)
+            return panel
+        def create_data_table_tab(self):
+            """Create trajectory data table tab."""
+            tab = QWidget()
+            layout = QVBoxLayout(tab)
+            self.data_table = QTableWidget()
+            headers = ["Distance (m)", "Drop (cm)", "Velocity (m/s)", "Energy (J)", "Time (s)", "Wind Drift (cm)"]
+            self.data_table.setColumnCount(len(headers))
+            self.data_table.setHorizontalHeaderLabels(headers)
+            # Set column properties
+            header = self.data_table.horizontalHeader()
+            header.setSectionResizeMode(QHeaderView.ResizeToContents)
+            layout.addWidget(self.data_table)
+            self.results_tabs.addTab(tab, "ðŸ“Š Data Table")
+        def create_comeups_tab(self):
+            """Create scope adjustments (come-ups) tab."""
+            tab = QWidget()
+            layout = QVBoxLayout(tab)
+            # Distance selection
+            distances_layout = QHBoxLayout()
+            distances_layout.addWidget(QLabel("Calculate come-ups for distances:"))
+            self.comeup_distances_edit = QLineEdit("100, 200, 300, 400, 500")
+            self.comeup_distances_edit.setPlaceholderText("Enter distances separated by commas")
+            distances_layout.addWidget(self.comeup_distances_edit)
+            calc_comeups_btn = QPushButton("Calculate")
+            calc_comeups_btn.clicked.connect(self.calculate_comeups)
+            distances_layout.addWidget(calc_comeups_btn)
+            layout.addLayout(distances_layout)
+            # Come-ups table
+            self.comeups_table = QTableWidget()
+            comeup_headers = ["Distance (m)", "Elevation (MOA)", "Windage (MOA)", 
+                             "Elev. Clicks", "Wind Clicks", "Velocity (m/s)", "Energy (J)", "Time (s)"]
+            self.comeups_table.setColumnCount(len(comeup_headers))
+            self.comeups_table.setHorizontalHeaderLabels(comeup_headers)
+            header = self.comeups_table.horizontalHeader()
+            header.setSectionResizeMode(QHeaderView.ResizeToContents)
+            layout.addWidget(self.comeups_table)
+            self.results_tabs.addTab(tab, "ðŸŽ¯ Come-Ups")
+        def create_summary_tab(self):
+            """Create ballistics summary tab."""
+            tab = QWidget()
+            layout = QVBoxLayout(tab)
+            self.summary_text = QTextEdit()
+            self.summary_text.setReadOnly(True)
+            self.summary_text.setFont(QFont("monospace", 10))
+            layout.addWidget(self.summary_text)
+            self.results_tabs.addTab(tab, "ðŸ“‹ Summary")
+    
+        def prompt_export_results(self):
+            """Prompt the user to export current trajectory results."""
+            if not self.current_result:
+                QMessageBox.information(self, "No Results", "Please calculate a trajectory before exporting.")
+                return
+            format_type = self.export_format_combo.currentText()
+            ammo_name = self.current_result.ammunition.name if self.current_result.ammunition else "trajectory"
+            safe_stem = ''.join(ch if ch.isalnum() else '_' for ch in ammo_name).strip('_') or 'trajectory'
+            default_name = f"{safe_stem.lower()}_{datetime.now().strftime('%Y%m%d')}.{format_type.lower()}"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                f"Export Ballistics as {format_type}",
+                default_name,
+                f"{format_type} Files (*.{format_type.lower()})"
+            )
+            if not file_path:
+                return
+            try:
+                self.export_results(file_path, format_type)
+                self.status_message.emit(f"Exported trajectory to {Path(file_path).name}")
+            except Exception as exc:
+                self.log_error("Failed to export ballistics results", exception=exc)
+                QMessageBox.critical(self, "Export Error", f"Failed to export results: {str(exc)}")
+
+        def apply_styling(self):
+            """Apply styling to the ballistics module."""
+            style = """
+            QGroupBox {
+                font-size: 14px;
+                font-weight: bold;
+                margin-top: 15px;
+                padding-top: 8px;
+                border: 2px solid #3d5a8c;
+                border-radius: 8px;
+                background-color: #f8f9fa;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                padding: 0 8px;
+                color: #2c5aa0;
+            }
+            QPushButton#primary {
+                background-color: #2c5aa0;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: bold;
+                padding: 15px;
+            }
+            QPushButton#primary:hover {
+                background-color: #3d6bb0;
+            }
+            QSpinBox, QDoubleSpinBox, QComboBox {
+                min-height: 35px;
+                font-size: 14px;
+            }
+            QTableWidget {
+                gridline-color: #dee2e6;
+                background-color: white;
+                alternate-background-color: #f8f9fa;
+            }
+            QHeaderView::section {
+                background-color: #e9ecef;
+                padding: 8px;
+                border: none;
+                font-weight: bold;
+            }
+            """
+            self.setStyleSheet(style)
+
+        def on_caliber_changed(self, caliber: str):
+            """Handle caliber selection change."""
+            self.ammo_combo.clear()
+            if caliber == "Custom":
+                self.custom_ammo_group.setVisible(True)
+                self.ammo_combo.addItem("Custom Ammunition")
+            else:
+                self.custom_ammo_group.setVisible(False)
+                ammo_list = self.ammo_db.get_by_caliber(caliber)
+                for ammo in ammo_list:
+                    self.ammo_combo.addItem(ammo.name, ammo)
+        def on_ammunition_changed(self, index: int):
+            """Handle ammunition selection change."""
+            if self.caliber_combo.currentText() != "Custom" and index >= 0:
+                ammo = self.ammo_combo.itemData(index)
+                if ammo:
+                    self.bullet_weight_spin.setValue(ammo.bullet_weight)
+                    self.muzzle_velocity_spin.setValue(ammo.muzzle_velocity)
+                    self.ballistic_coefficient_spin.setValue(ammo.ballistic_coefficient)
+                    # Set drag model
+                    for i in range(self.drag_model_combo.count()):
+                        if self.drag_model_combo.itemData(i) == ammo.drag_model:
+                            self.drag_model_combo.setCurrentIndex(i)
+                            break
+        def _get_active_ammunition(self) -> Ammunition:
+            """Return a copy of the currently configured ammunition."""
             if self.caliber_combo.currentText() == "Custom":
-                ammo = Ammunition(
+                drag_model = self.drag_model_combo.currentData()
+                if not isinstance(drag_model, DragModel):
+                    drag_model = DragModel.G1
+                return Ammunition(
                     name="Custom",
                     caliber="Custom",
                     bullet_weight=self.bullet_weight_spin.value(),
                     muzzle_velocity=self.muzzle_velocity_spin.value(),
                     ballistic_coefficient=self.ballistic_coefficient_spin.value(),
-                    drag_model=self.drag_model_combo.currentData()
+                    drag_model=drag_model,
                 )
-            else:
-                ammo = self.ammo_combo.currentData()
-                if not ammo:
-                    QMessageBox.warning(self, "No Ammunition", "Please select ammunition.")
-                    return
-            # Create environmental conditions
-            environment = EnvironmentalData(
-                temperature=self.temperature_spin.value(),
-                pressure=self.pressure_spin.value(),
-                humidity=self.humidity_spin.value(),
-                altitude=self.altitude_spin.value(),
-                wind_speed=self.wind_speed_spin.value(),
-                wind_direction=self.wind_direction_spin.value()
-            )
-            # Calculate trajectory
-            self.current_result = self.calculator.calculate_trajectory(
-                ammo=ammo,
-                environment=environment,
-                zero_distance=self.zero_distance_spin.value(),
-                max_range=self.max_range_spin.value(),
-                vital_zone_diameter=self.vital_zone_spin.value()
-            )
-            # Update displays
-            self.update_trajectory_chart()
-            self.update_data_table()
-            self.update_summary()
-            if hasattr(self, 'export_results_btn'):
-                self.export_results_btn.setEnabled(True)
-            self.status_message.emit(f"Calculated trajectory for {ammo.name}")
-            self.log_user_action("ballistics_calculated", {
-                "ammunition": ammo.name,
-                "zero_distance": self.zero_distance_spin.value()
-            })
-        except Exception as e:
-            self.log_error("Ballistics calculation failed", exception=e)
-            self.error_occurred.emit("Calculation Error", f"Failed to calculate trajectory: {str(e)}")
-    def update_trajectory_chart(self):
-        """Update the trajectory chart."""
-        if not self.current_result:
-            return
-        try:
-            chart = QChart()
-            chart.setTitle("Bullet Trajectory")
-            # Trajectory series
-            trajectory_series = QLineSeries()
-            trajectory_series.setName("Trajectory")
-            for point in self.current_result.trajectory:
-                trajectory_series.append(point.distance, point.drop * 100)  # Convert to cm
-            chart.addSeries(trajectory_series)
-            # Axes
-            axis_x = QValueAxis()
-            axis_x.setTitleText("Distance (m)")
-            axis_x.setLabelFormat("%d")
-            axis_y = QValueAxis()
-            axis_y.setTitleText("Drop (cm)")
-            axis_y.setLabelFormat("%.1f")
-            chart.addAxis(axis_x, Qt.AlignBottom)
-            chart.addAxis(axis_y, Qt.AlignLeft)
-            trajectory_series.attachAxis(axis_x)
-            trajectory_series.attachAxis(axis_y)
-            self.chart_view.setChart(chart)
-        except Exception as e:
-            self.log_error("Failed to update trajectory chart", exception=e)
-    def update_data_table(self):
-        """Update the trajectory data table."""
-        if not self.current_result:
-            return
-        try:
-            trajectory = self.current_result.trajectory
-            self.data_table.setRowCount(len(trajectory))
-            for row, point in enumerate(trajectory):
-                items = [
-                    QTableWidgetItem(f"{point.distance:.0f}"),
-                    QTableWidgetItem(f"{point.drop * 100:.1f}"),  # Convert to cm
-                    QTableWidgetItem(f"{point.velocity:.1f}"),
-                    QTableWidgetItem(f"{point.energy:.0f}"),
-                    QTableWidgetItem(f"{point.time:.3f}"),
-                    QTableWidgetItem(f"{point.windage * 100:.1f}")  # Convert to cm
-                ]
-                for col, item in enumerate(items):
-                    item.setTextAlignment(Qt.AlignCenter)
-                    self.data_table.setItem(row, col, item)
-        except Exception as e:
-            self.log_error("Failed to update data table", exception=e)
-    def calculate_comeups(self):
-        """Calculate scope adjustments for specified distances."""
-        if not self.current_result:
-            QMessageBox.information(self, "No Data", "Please calculate trajectory first.")
-            return
-        try:
-            # Parse distances
-            distance_text = self.comeup_distances_edit.text()
-            distances = [float(d.strip()) for d in distance_text.split(',') if d.strip()]
-            if not distances:
-                QMessageBox.warning(self, "Invalid Input", "Please enter valid distances.")
+            ammo = self.ammo_combo.currentData()
+            if not isinstance(ammo, Ammunition):
+                raise ValueError("No ammunition selected for ballistic profile")
+            return Ammunition.from_dict(ammo.to_dict())
+        def _apply_custom_ammunition(self, ammo: Ammunition) -> None:
+            """Apply a custom ammunition configuration to the UI."""
+            if self.caliber_combo.findText("Custom") >= 0:
+                self.caliber_combo.setCurrentText("Custom")
+            self.custom_ammo_group.setVisible(True)
+            self.bullet_weight_spin.setValue(ammo.bullet_weight)
+            self.muzzle_velocity_spin.setValue(ammo.muzzle_velocity)
+            self.ballistic_coefficient_spin.setValue(ammo.ballistic_coefficient)
+            drag_index = self.drag_model_combo.findData(ammo.drag_model)
+            if drag_index >= 0:
+                self.drag_model_combo.setCurrentIndex(drag_index)
+        def _apply_ammunition_to_ui(self, ammo: Ammunition) -> None:
+            """Populate UI widgets with the provided ammunition selection."""
+            caliber_index = self.caliber_combo.findText(ammo.caliber)
+            if caliber_index == -1 or ammo.caliber == "Custom":
+                self._apply_custom_ammunition(ammo)
                 return
-            # Calculate come-ups
-            come_ups = self.calculator.calculate_come_ups(self.current_result, distances)
-            # Update table
-            self.comeups_table.setRowCount(len(distances))
-            for row, distance in enumerate(distances):
-                if distance in come_ups:
-                    data = come_ups[distance]
+            self.caliber_combo.setCurrentIndex(caliber_index)
+            # Ensure ammunition list reflects the caliber before selection
+            self.on_caliber_changed(ammo.caliber)
+            for idx in range(self.ammo_combo.count()):
+                item_data = self.ammo_combo.itemData(idx)
+                if isinstance(item_data, Ammunition) and item_data.name == ammo.name:
+                    self.ammo_combo.setCurrentIndex(idx)
+                    break
+            else:
+                self._apply_custom_ammunition(ammo)
+        def calculate_ballistics(self):
+            """Calculate ballistics trajectory."""
+            try:
+                # Create ammunition object
+                if self.caliber_combo.currentText() == "Custom":
+                    ammo = Ammunition(
+                        name="Custom",
+                        caliber="Custom",
+                        bullet_weight=self.bullet_weight_spin.value(),
+                        muzzle_velocity=self.muzzle_velocity_spin.value(),
+                        ballistic_coefficient=self.ballistic_coefficient_spin.value(),
+                        drag_model=self.drag_model_combo.currentData()
+                    )
+                else:
+                    ammo = self.ammo_combo.currentData()
+                    if not ammo:
+                        QMessageBox.warning(self, "No Ammunition", "Please select ammunition.")
+                        return
+                # Create environmental conditions
+                environment = EnvironmentalData(
+                    temperature=self.temperature_spin.value(),
+                    pressure=self.pressure_spin.value(),
+                    humidity=self.humidity_spin.value(),
+                    altitude=self.altitude_spin.value(),
+                    wind_speed=self.wind_speed_spin.value(),
+                    wind_direction=self.wind_direction_spin.value()
+                )
+                # Calculate trajectory
+                self.current_result = self.calculator.calculate_trajectory(
+                    ammo=ammo,
+                    environment=environment,
+                    zero_distance=self.zero_distance_spin.value(),
+                    max_range=self.max_range_spin.value(),
+                    vital_zone_diameter=self.vital_zone_spin.value()
+                )
+                self.adaptive_advisor.update_baseline_environment(environment)
+                try:
+                    self.adaptive_advisor.refresh_from_sensors()
+                except Exception as sensor_exc:  # pragma: no cover - defensive logging
+                    self.log_warning(
+                        "Unable to refresh sensor telemetry for ballistics suggestions",
+                        exception=sensor_exc,
+                    )
+                self._adaptive_suggestions = self.adaptive_advisor.generate_suggestions(self.current_result)
+                # Update displays
+                self.update_trajectory_chart()
+                self.update_data_table()
+                self.update_summary()
+                if hasattr(self, 'export_results_btn'):
+                    self.export_results_btn.setEnabled(True)
+                self.status_message.emit(f"Calculated trajectory for {ammo.name}")
+                self.log_user_action("ballistics_calculated", {
+                    "ammunition": ammo.name,
+                    "zero_distance": self.zero_distance_spin.value()
+                })
+            except Exception as e:
+                self.log_error("Ballistics calculation failed", exception=e)
+                self.error_occurred.emit("Calculation Error", f"Failed to calculate trajectory: {str(e)}")
+        def update_trajectory_chart(self):
+            """Update the trajectory chart."""
+            if not self.current_result:
+                return
+            try:
+                chart = QChart()
+                chart.setTitle("Bullet Trajectory")
+                # Trajectory series
+                trajectory_series = QLineSeries()
+                trajectory_series.setName("Trajectory")
+                for point in self.current_result.trajectory:
+                    trajectory_series.append(point.distance, point.drop * 100)  # Convert to cm
+                chart.addSeries(trajectory_series)
+                # Axes
+                axis_x = QValueAxis()
+                axis_x.setTitleText("Distance (m)")
+                axis_x.setLabelFormat("%d")
+                axis_y = QValueAxis()
+                axis_y.setTitleText("Drop (cm)")
+                axis_y.setLabelFormat("%.1f")
+                chart.addAxis(axis_x, Qt.AlignBottom)
+                chart.addAxis(axis_y, Qt.AlignLeft)
+                trajectory_series.attachAxis(axis_x)
+                trajectory_series.attachAxis(axis_y)
+                self.chart_view.setChart(chart)
+            except Exception as e:
+                self.log_error("Failed to update trajectory chart", exception=e)
+        def update_data_table(self):
+            """Update the trajectory data table."""
+            if not self.current_result:
+                return
+            try:
+                trajectory = self.current_result.trajectory
+                self.data_table.setRowCount(len(trajectory))
+                for row, point in enumerate(trajectory):
                     items = [
-                        QTableWidgetItem(f"{distance:.0f}"),
-                        QTableWidgetItem(f"{data['elevation_moa']:.2f}"),
-                        QTableWidgetItem(f"{data['windage_moa']:.2f}"),
-                        QTableWidgetItem(f"{data['elevation_clicks']:.0f}"),
-                        QTableWidgetItem(f"{data['windage_clicks']:.0f}"),
-                        QTableWidgetItem(f"{data['velocity']:.1f}"),
-                        QTableWidgetItem(f"{data['energy']:.0f}"),
-                        QTableWidgetItem(f"{data['time_of_flight']:.3f}")
+                        QTableWidgetItem(f"{point.distance:.0f}"),
+                        QTableWidgetItem(f"{point.drop * 100:.1f}"),  # Convert to cm
+                        QTableWidgetItem(f"{point.velocity:.1f}"),
+                        QTableWidgetItem(f"{point.energy:.0f}"),
+                        QTableWidgetItem(f"{point.time:.3f}"),
+                        QTableWidgetItem(f"{point.windage * 100:.1f}")  # Convert to cm
                     ]
                     for col, item in enumerate(items):
                         item.setTextAlignment(Qt.AlignCenter)
-                        self.comeups_table.setItem(row, col, item)
-            self.log_user_action("comeups_calculated", {"distances": distances})
-        except Exception as e:
-            self.log_error("Failed to calculate come-ups", exception=e)
-            self.error_occurred.emit("Come-Up Error", f"Failed to calculate come-ups: {str(e)}")
-    def update_summary(self):
-        """Update the ballistics summary."""
-        if not self.current_result:
-            return
-        try:
-            result = self.current_result
-            ammo = result.ammunition
-            env = result.environment
-            summary = f"""
-BALLISTICS SUMMARY
-==================
-Ammunition: {ammo.name}
-Caliber: {ammo.caliber}
-Bullet Weight: {ammo.bullet_weight} gr
-Muzzle Velocity: {ammo.muzzle_velocity} m/s
-Ballistic Coefficient: {ammo.ballistic_coefficient} ({ammo.drag_model.value})
-Muzzle Energy: {result.muzzle_energy:.0f} J
-Environmental Conditions:
-Temperature: {env.temperature}Â°C
-Pressure: {env.pressure} hPa
-Humidity: {env.humidity}%
-Altitude: {env.altitude} m
-Wind: {env.wind_speed} m/s @ {env.wind_direction}Â°
-Zero Distance: {result.zero_distance} m
-Maximum Point Blank Range: {result.max_point_blank_range:.0f} m
-Vital Zone Diameter: {result.vital_zone_diameter} m
-TRAJECTORY DATA (Every 100m):
-Distance    Drop      Velocity   Energy    Time     Wind Drift
-  (m)       (cm)      (m/s)      (J)       (s)       (cm)
---------------------------------------------------------------
-"""
-            # Add trajectory data every 100m
-            for point in result.trajectory:
-                if point.distance % 100 == 0:
-                    summary += f"{point.distance:6.0f}    {point.drop*100:6.1f}    {point.velocity:8.1f}   {point.energy:7.0f}   {point.time:6.3f}    {point.windage*100:6.1f}\n"
-            self.summary_text.setPlainText(summary)
-        except Exception as e:
-            self.log_error("Failed to update summary", exception=e)
-    def load_settings(self):
-        """Load saved settings."""
-        try:
-            # Load last used values
-            self.temperature_spin.setValue(self.settings.value("temperature", 15, int))
-            self.pressure_spin.setValue(self.settings.value("pressure", 1013.25, float))
-            self.humidity_spin.setValue(self.settings.value("humidity", 50, int))
-            self.altitude_spin.setValue(self.settings.value("altitude", 0, int))
-            self.zero_distance_spin.setValue(self.settings.value("zero_distance", 100, int))
-            self.max_range_spin.setValue(self.settings.value("max_range", 800, int))
-            # Initial caliber and ammo selection
-            QTimer.singleShot(100, lambda: self.on_caliber_changed(self.caliber_combo.currentText()))
-        except Exception as e:
-            self.log_warning("Failed to load settings", exception=e)
-    def save_settings(self):
-        """Save current settings."""
-        try:
-            self.settings.setValue("temperature", self.temperature_spin.value())
-            self.settings.setValue("pressure", self.pressure_spin.value())
-            self.settings.setValue("humidity", self.humidity_spin.value())
-            self.settings.setValue("altitude", self.altitude_spin.value())
-            self.settings.setValue("zero_distance", self.zero_distance_spin.value())
-            self.settings.setValue("max_range", self.max_range_spin.value())
-        except Exception as e:
-            self.log_warning("Failed to save settings", exception=e)
-    def export_results(self, file_path: str, format_type: str = "CSV"):
-        """Export ballistics results to file."""
-        if not self.current_result:
-            raise ValueError("No calculation results to export")
-        try:
-            if format_type.upper() == "CSV":
-                self._export_csv(file_path)
-            elif format_type.upper() == "JSON":
-                self._export_json(file_path)
-            elif format_type.upper() == "KML":
-                self._export_kml(file_path)
-            else:
-                raise ValueError(f"Unsupported export format: {format_type}")
-            self.log_user_action("ballistics_export", {
-                "format": format_type,
-                "file_path": file_path,
-                "ammunition": self.current_result.ammunition.name
-            })
-        except Exception as e:
-            self.log_error("Failed to export ballistics results", exception=e)
-            raise
-    def _export_csv(self, file_path: str):
-        """Export results to CSV format."""
-        import csv
-        with open(file_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            # Header information
-            writer.writerow(["Hunt Pro Ballistics Calculation"])
-            writer.writerow([f"Ammunition: {self.current_result.ammunition.name}"])
-            writer.writerow([f"Zero Distance: {self.current_result.zero_distance} m"])
-            writer.writerow([f"Environment: {self.current_result.environment.temperature}Â°C, {self.current_result.environment.pressure} hPa"])
-            writer.writerow([])
-            # Column headers
-            writer.writerow(["Distance (m)", "Drop (cm)", "Velocity (m/s)", "Energy (J)", "Time (s)", "Wind Drift (cm)"])
-            # Data rows
-            for point in self.current_result.trajectory:
-                writer.writerow([
-                    f"{point.distance:.0f}",
-                    f"{point.drop * 100:.1f}",
-                    f"{point.velocity:.1f}",
-                    f"{point.energy:.0f}",
-                    f"{point.time:.3f}",
-                    f"{point.windage * 100:.1f}"
-                ])
-    def _export_json(self, file_path: str):
-        """Export results to JSON format."""
-        data = {
-            "ammunition": {
-                "name": self.current_result.ammunition.name,
-                "caliber": self.current_result.ammunition.caliber,
-                "bullet_weight": self.current_result.ammunition.bullet_weight,
-                "muzzle_velocity": self.current_result.ammunition.muzzle_velocity,
-                "ballistic_coefficient": self.current_result.ammunition.ballistic_coefficient,
-                "drag_model": self.current_result.ammunition.drag_model.value
-            },
-            "environment": {
-                "temperature": self.current_result.environment.temperature,
-                "pressure": self.current_result.environment.pressure,
-                "humidity": self.current_result.environment.humidity,
-                "altitude": self.current_result.environment.altitude,
-                "wind_speed": self.current_result.environment.wind_speed,
-                "wind_direction": self.current_result.environment.wind_direction
-            },
-            "zero_distance": self.current_result.zero_distance,
-            "max_point_blank_range": self.current_result.max_point_blank_range,
-            "muzzle_energy": self.current_result.muzzle_energy,
-            "trajectory": [
-                {
-                    "distance": point.distance,
-                    "drop": point.drop,
-                    "velocity": point.velocity,
-                    "energy": point.energy,
-                    "time": point.time,
-                    "windage": point.windage
-                }
-                for point in self.current_result.trajectory
-            ]
-        }
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+                        self.data_table.setItem(row, col, item)
+            except Exception as e:
+                self.log_error("Failed to update data table", exception=e)
+        def calculate_comeups(self):
+            """Calculate scope adjustments for specified distances."""
+            if not self.current_result:
+                QMessageBox.information(self, "No Data", "Please calculate trajectory first.")
+                return
+            try:
+                # Parse distances
+                distance_text = self.comeup_distances_edit.text()
+                distances = [float(d.strip()) for d in distance_text.split(',') if d.strip()]
+                if not distances:
+                    QMessageBox.warning(self, "Invalid Input", "Please enter valid distances.")
+                    return
+                # Calculate come-ups
+                come_ups = self.calculator.calculate_come_ups(self.current_result, distances)
+                # Update table
+                self.comeups_table.setRowCount(len(distances))
+                for row, distance in enumerate(distances):
+                    if distance in come_ups:
+                        data = come_ups[distance]
+                        items = [
+                            QTableWidgetItem(f"{distance:.0f}"),
+                            QTableWidgetItem(f"{data['elevation_moa']:.2f}"),
+                            QTableWidgetItem(f"{data['windage_moa']:.2f}"),
+                            QTableWidgetItem(f"{data['elevation_clicks']:.0f}"),
+                            QTableWidgetItem(f"{data['windage_clicks']:.0f}"),
+                            QTableWidgetItem(f"{data['velocity']:.1f}"),
+                            QTableWidgetItem(f"{data['energy']:.0f}"),
+                            QTableWidgetItem(f"{data['time_of_flight']:.3f}")
+                        ]
+                        for col, item in enumerate(items):
+                            item.setTextAlignment(Qt.AlignCenter)
+                            self.comeups_table.setItem(row, col, item)
+                self.log_user_action("comeups_calculated", {"distances": distances})
+            except Exception as e:
+                self.log_error("Failed to calculate come-ups", exception=e)
+                self.error_occurred.emit("Come-Up Error", f"Failed to calculate come-ups: {str(e)}")
+        def update_summary(self):
+            """Update the ballistics summary."""
+            if not self.current_result:
+                return
+            try:
+                result = self.current_result
+                ammo = result.ammunition
+                env = result.environment
+                summary = f"""
+    BALLISTICS SUMMARY
+    ==================
+    Ammunition: {ammo.name}
+    Caliber: {ammo.caliber}
+    Bullet Weight: {ammo.bullet_weight} gr
+    Muzzle Velocity: {ammo.muzzle_velocity} m/s
+    Ballistic Coefficient: {ammo.ballistic_coefficient} ({ammo.drag_model.value})
+    Muzzle Energy: {result.muzzle_energy:.0f} J
+    Environmental Conditions:
+    Temperature: {env.temperature}Â°C
+    Pressure: {env.pressure} hPa
+    Humidity: {env.humidity}%
+    Altitude: {env.altitude} m
+    Wind: {env.wind_speed} m/s @ {env.wind_direction}Â°
+    Zero Distance: {result.zero_distance} m
+    Maximum Point Blank Range: {result.max_point_blank_range:.0f} m
+    Vital Zone Diameter: {result.vital_zone_diameter} m
+    """
+                summary += "\nADAPTIVE BALLISTIC SUGGESTIONS:\n"
+                if self._adaptive_suggestions:
+                    for suggestion in self._adaptive_suggestions:
+                        summary += suggestion.format_for_summary() + "\n"
+                else:
+                    summary += "No live sensor suggestions available.\n"
+                summary += "\nTRAJECTORY DATA (Every 100m):\n"
+                summary += """
+    TRAJECTORY DATA (Every 100m):
+    Distance    Drop      Velocity   Energy    Time     Wind Drift
+      (m)       (cm)      (m/s)      (J)       (s)       (cm)
+    --------------------------------------------------------------
+    """
+                # Add trajectory data every 100m
+                for point in result.trajectory:
+                    if point.distance % 100 == 0:
+                        summary += f"{point.distance:6.0f}    {point.drop*100:6.1f}    {point.velocity:8.1f}   {point.energy:7.0f}   {point.time:6.3f}    {point.windage*100:6.1f}\n"
+                self.summary_text.setPlainText(summary)
+            except Exception as e:
+                self.log_error("Failed to update summary", exception=e)
+        def load_settings(self):
+            """Load saved settings."""
+            try:
+                # Load last used values
+                self.temperature_spin.setValue(self.settings.value("temperature", 15, int))
+                self.pressure_spin.setValue(self.settings.value("pressure", 1013.25, float))
+                self.humidity_spin.setValue(self.settings.value("humidity", 50, int))
+                self.altitude_spin.setValue(self.settings.value("altitude", 0, int))
+                self.zero_distance_spin.setValue(self.settings.value("zero_distance", 100, int))
+                self.max_range_spin.setValue(self.settings.value("max_range", 800, int))
+                # Initial caliber and ammo selection
+                QTimer.singleShot(100, lambda: self.on_caliber_changed(self.caliber_combo.currentText()))
+            except Exception as e:
+                self.log_warning("Failed to load settings", exception=e)
+        def save_settings(self):
+            """Save current settings."""
+            try:
+                self.settings.setValue("temperature", self.temperature_spin.value())
+                self.settings.setValue("pressure", self.pressure_spin.value())
+                self.settings.setValue("humidity", self.humidity_spin.value())
+                self.settings.setValue("altitude", self.altitude_spin.value())
+                self.settings.setValue("zero_distance", self.zero_distance_spin.value())
+                self.settings.setValue("max_range", self.max_range_spin.value())
+            except Exception as e:
+                self.log_warning("Failed to save settings", exception=e)
+        def export_results(self, file_path: str, format_type: str = "CSV"):
+            """Export ballistics results to file."""
+            if not self.current_result:
+                raise ValueError("No calculation results to export")
+            try:
+                if format_type.upper() == "CSV":
+                    self._export_csv(file_path)
+                elif format_type.upper() == "JSON":
+                    self._export_json(file_path)
+                elif format_type.upper() == "KML":
+                    self._export_kml(file_path)
+                else:
+                    raise ValueError(f"Unsupported export format: {format_type}")
+                self.log_user_action("ballistics_export", {
+                    "format": format_type,
+                    "file_path": file_path,
+                    "ammunition": self.current_result.ammunition.name
+                })
+            except Exception as e:
+                self.log_error("Failed to export ballistics results", exception=e)
+                raise
 
-    def _export_kml(self, file_path: str):
-        """Export results to KML format for interoperability with mapping tools."""
-        kml = ET.Element('kml', xmlns="http://www.opengis.net/kml/2.2")
-        document = ET.SubElement(kml, 'Document')
-        ammo_name = self.current_result.ammunition.name
-        ET.SubElement(document, 'name').text = f"Ballistic Trajectory - {ammo_name}"
+else:  # pragma: no cover - UI unavailable without Qt bindings
 
-        summary = ET.SubElement(document, 'Placemark')
-        ET.SubElement(summary, 'name').text = 'Trajectory Summary'
-        summary_lines = [
-            f"Ammunition: {ammo_name}",
-            f"Zero Distance: {self.current_result.zero_distance} m",
-            f"Environment: {self.current_result.environment.temperature}°C, {self.current_result.environment.pressure} hPa",
-        ]
-        ET.SubElement(summary, 'description').text = '\n'.join(summary_lines)
+    class BallisticsModule:  # type: ignore[no-redef]
+        """Placeholder module when Qt bindings are unavailable."""
 
-        series_folder = ET.SubElement(document, 'Folder')
-        ET.SubElement(series_folder, 'name').text = 'Trajectory Data Points'
-
-        for point in self.current_result.trajectory:
-            placemark = ET.SubElement(series_folder, 'Placemark')
-            ET.SubElement(placemark, 'name').text = f"{point.distance:.0f} m"
-            description = [
-                f"Drop: {point.drop * 100:.1f} cm",
-                f"Velocity: {point.velocity:.1f} m/s",
-                f"Energy: {point.energy:.0f} J",
-                f"Time: {point.time:.3f} s",
-                f"Wind Drift: {point.windage * 100:.1f} cm",
-            ]
-            ET.SubElement(placemark, 'description').text = '\n'.join(description)
-
-            extended = ET.SubElement(placemark, 'ExtendedData')
-            values = {
-                'distance_m': point.distance,
-                'drop_m': point.drop,
-                'velocity_mps': point.velocity,
-                'energy_j': point.energy,
-                'time_s': point.time,
-                'windage_m': point.windage,
+        def __init__(self, *_, **__):
+            raise ImportError(
+                "PySide6 is required to instantiate BallisticsModule"
+            )
+        def _export_csv(self, file_path: str):
+            """Export results to CSV format."""
+            import csv
+            with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                # Header information
+                writer.writerow(["Hunt Pro Ballistics Calculation"])
+                writer.writerow([f"Ammunition: {self.current_result.ammunition.name}"])
+                writer.writerow([f"Zero Distance: {self.current_result.zero_distance} m"])
+                writer.writerow([f"Environment: {self.current_result.environment.temperature}Â°C, {self.current_result.environment.pressure} hPa"])
+                writer.writerow([])
+                # Column headers
+                writer.writerow(["Distance (m)", "Drop (cm)", "Velocity (m/s)", "Energy (J)", "Time (s)", "Wind Drift (cm)"])
+                # Data rows
+                for point in self.current_result.trajectory:
+                    writer.writerow([
+                        f"{point.distance:.0f}",
+                        f"{point.drop * 100:.1f}",
+                        f"{point.velocity:.1f}",
+                        f"{point.energy:.0f}",
+                        f"{point.time:.3f}",
+                        f"{point.windage * 100:.1f}"
+                    ])
+        def _export_json(self, file_path: str):
+            """Export results to JSON format."""
+            data = {
+                "ammunition": {
+                    "name": self.current_result.ammunition.name,
+                    "caliber": self.current_result.ammunition.caliber,
+                    "bullet_weight": self.current_result.ammunition.bullet_weight,
+                    "muzzle_velocity": self.current_result.ammunition.muzzle_velocity,
+                    "ballistic_coefficient": self.current_result.ammunition.ballistic_coefficient,
+                    "drag_model": self.current_result.ammunition.drag_model.value
+                },
+                "environment": {
+                    "temperature": self.current_result.environment.temperature,
+                    "pressure": self.current_result.environment.pressure,
+                    "humidity": self.current_result.environment.humidity,
+                    "altitude": self.current_result.environment.altitude,
+                    "wind_speed": self.current_result.environment.wind_speed,
+                    "wind_direction": self.current_result.environment.wind_direction
+                },
+                "zero_distance": self.current_result.zero_distance,
+                "max_point_blank_range": self.current_result.max_point_blank_range,
+                "muzzle_energy": self.current_result.muzzle_energy,
+                "trajectory": [
+                    {
+                        "distance": point.distance,
+                        "drop": point.drop,
+                        "velocity": point.velocity,
+                        "energy": point.energy,
+                        "time": point.time,
+                        "windage": point.windage
+                    }
+                    for point in self.current_result.trajectory
+                ]
             }
-            for key, value in values.items():
-                data = ET.SubElement(extended, 'Data', name=key)
-                ET.SubElement(data, 'value').text = f"{value}"
-
-            point_element = ET.SubElement(placemark, 'Point')
-            # Encode range along longitude (kilometers) with drop influencing altitude for visualization
-            longitude = point.distance / 1000.0
-            altitude = -point.drop
-            ET.SubElement(point_element, 'coordinates').text = f"{longitude:.6f},0,{altitude:.6f}"
-
-        tree = ET.ElementTree(kml)
-        tree.write(file_path, encoding='utf-8', xml_declaration=True)
-    def cleanup(self):
-        """Clean up resources when module is closed."""
-        self.save_settings()
-        super().cleanup()
-        self.log_info("Ballistics module cleaned up")
-    def get_display_name(self) -> str:
-        """Return the display name for this module."""
-        return "Ballistics Calculator"
-    def create_profile_snapshot(self, name: str, notes: str = "") -> BallisticProfile:
-        """Capture the current module configuration as a ballistic profile."""
-        normalized_name = name.strip()
-        if not normalized_name:
-            raise ValueError("Profile name is required")
-        ammunition = self._get_active_ammunition()
-        environment = EnvironmentalData(
-            temperature=float(self.temperature_spin.value()),
-            pressure=float(self.pressure_spin.value()),
-            humidity=float(self.humidity_spin.value()),
-            altitude=float(self.altitude_spin.value()),
-            wind_speed=float(self.wind_speed_spin.value()),
-            wind_direction=float(self.wind_direction_spin.value()),
-        )
-        profile = BallisticProfile(
-            name=normalized_name,
-            ammunition=ammunition,
-            environment=environment,
-            zero_distance=float(self.zero_distance_spin.value()),
-            max_range=float(self.max_range_spin.value()),
-            vital_zone_diameter=float(self.vital_zone_spin.value()),
-            notes=notes.strip(),
-        )
-        return profile
-    def save_ballistic_profile(self, name: str, notes: str = "") -> BallisticProfile:
-        """Persist a ballistic profile snapshot to disk."""
-        profile = self.create_profile_snapshot(name, notes)
-        self.profile_storage.save_profile(profile)
-        self.status_message.emit(f"Saved ballistic profile '{profile.name}'")
-        self.log_user_action("ballistic_profile_saved", {"profile": profile.name})
-        return profile
-    def load_ballistic_profile(self, name: str) -> BallisticProfile:
-        """Load a saved ballistic profile and apply it to the UI."""
-        profiles = self.profile_storage.load_profiles()
-        if name not in profiles:
-            raise KeyError(f"Ballistic profile '{name}' not found")
-        profile = profiles[name]
-        self._apply_ammunition_to_ui(profile.ammunition)
-        environment = profile.environment
-        def apply_spin(spin, value):
-            minimum = spin.minimum()
-            maximum = spin.maximum()
-            coerced = max(minimum, min(maximum, value))
-            if isinstance(spin, QSpinBox):
-                spin.setValue(int(round(coerced)))
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+    
+        def _export_kml(self, file_path: str):
+            """Export results to KML format for interoperability with mapping tools."""
+            kml = ET.Element('kml', xmlns="http://www.opengis.net/kml/2.2")
+            document = ET.SubElement(kml, 'Document')
+            ammo_name = self.current_result.ammunition.name
+            ET.SubElement(document, 'name').text = f"Ballistic Trajectory - {ammo_name}"
+    
+            summary = ET.SubElement(document, 'Placemark')
+            ET.SubElement(summary, 'name').text = 'Trajectory Summary'
+            summary_lines = [
+                f"Ammunition: {ammo_name}",
+                f"Zero Distance: {self.current_result.zero_distance} m",
+                f"Environment: {self.current_result.environment.temperature}°C, {self.current_result.environment.pressure} hPa",
+            ]
+            ET.SubElement(summary, 'description').text = '\n'.join(summary_lines)
+    
+            series_folder = ET.SubElement(document, 'Folder')
+            ET.SubElement(series_folder, 'name').text = 'Trajectory Data Points'
+    
+            for point in self.current_result.trajectory:
+                placemark = ET.SubElement(series_folder, 'Placemark')
+                ET.SubElement(placemark, 'name').text = f"{point.distance:.0f} m"
+                description = [
+                    f"Drop: {point.drop * 100:.1f} cm",
+                    f"Velocity: {point.velocity:.1f} m/s",
+                    f"Energy: {point.energy:.0f} J",
+                    f"Time: {point.time:.3f} s",
+                    f"Wind Drift: {point.windage * 100:.1f} cm",
+                ]
+                ET.SubElement(placemark, 'description').text = '\n'.join(description)
+    
+                extended = ET.SubElement(placemark, 'ExtendedData')
+                values = {
+                    'distance_m': point.distance,
+                    'drop_m': point.drop,
+                    'velocity_mps': point.velocity,
+                    'energy_j': point.energy,
+                    'time_s': point.time,
+                    'windage_m': point.windage,
+                }
+                for key, value in values.items():
+                    data = ET.SubElement(extended, 'Data', name=key)
+                    ET.SubElement(data, 'value').text = f"{value}"
+    
+                point_element = ET.SubElement(placemark, 'Point')
+                # Encode range along longitude (kilometers) with drop influencing altitude for visualization
+                longitude = point.distance / 1000.0
+                altitude = -point.drop
+                ET.SubElement(point_element, 'coordinates').text = f"{longitude:.6f},0,{altitude:.6f}"
+    
+            tree = ET.ElementTree(kml)
+            tree.write(file_path, encoding='utf-8', xml_declaration=True)
+        def cleanup(self):
+            """Clean up resources when module is closed."""
+            self.save_settings()
+            super().cleanup()
+            self.log_info("Ballistics module cleaned up")
+        def get_display_name(self) -> str:
+            """Return the display name for this module."""
+            return "Ballistics Calculator"
+        def create_profile_snapshot(self, name: str, notes: str = "") -> BallisticProfile:
+            """Capture the current module configuration as a ballistic profile."""
+            normalized_name = name.strip()
+            if not normalized_name:
+                raise ValueError("Profile name is required")
+            ammunition = self._get_active_ammunition()
+            environment = EnvironmentalData(
+                temperature=float(self.temperature_spin.value()),
+                pressure=float(self.pressure_spin.value()),
+                humidity=float(self.humidity_spin.value()),
+                altitude=float(self.altitude_spin.value()),
+                wind_speed=float(self.wind_speed_spin.value()),
+                wind_direction=float(self.wind_direction_spin.value()),
+            )
+            profile = BallisticProfile(
+                name=normalized_name,
+                ammunition=ammunition,
+                environment=environment,
+                zero_distance=float(self.zero_distance_spin.value()),
+                max_range=float(self.max_range_spin.value()),
+                vital_zone_diameter=float(self.vital_zone_spin.value()),
+                notes=notes.strip(),
+            )
+            return profile
+        def save_ballistic_profile(self, name: str, notes: str = "") -> BallisticProfile:
+            """Persist a ballistic profile snapshot to disk."""
+            profile = self.create_profile_snapshot(name, notes)
+            self.profile_storage.save_profile(profile)
+            self.status_message.emit(f"Saved ballistic profile '{profile.name}'")
+            self.log_user_action("ballistic_profile_saved", {"profile": profile.name})
+            return profile
+        def load_ballistic_profile(self, name: str) -> BallisticProfile:
+            """Load a saved ballistic profile and apply it to the UI."""
+            profiles = self.profile_storage.load_profiles()
+            if name not in profiles:
+                raise KeyError(f"Ballistic profile '{name}' not found")
+            profile = profiles[name]
+            self._apply_ammunition_to_ui(profile.ammunition)
+            environment = profile.environment
+            def apply_spin(spin, value):
+                minimum = spin.minimum()
+                maximum = spin.maximum()
+                coerced = max(minimum, min(maximum, value))
+                if isinstance(spin, QSpinBox):
+                    spin.setValue(int(round(coerced)))
+                else:
+                    spin.setValue(float(coerced))
+            apply_spin(self.temperature_spin, environment.temperature)
+            apply_spin(self.pressure_spin, environment.pressure)
+            apply_spin(self.humidity_spin, environment.humidity)
+            apply_spin(self.altitude_spin, environment.altitude)
+            apply_spin(self.wind_speed_spin, environment.wind_speed)
+            apply_spin(self.wind_direction_spin, environment.wind_direction)
+            apply_spin(self.zero_distance_spin, profile.zero_distance)
+            apply_spin(self.max_range_spin, profile.max_range)
+            apply_spin(self.vital_zone_spin, profile.vital_zone_diameter)
+            self.status_message.emit(f"Loaded ballistic profile '{profile.name}'")
+            self.log_user_action("ballistic_profile_loaded", {"profile": profile.name})
+            return profile
+        def list_ballistic_profiles(self) -> List[str]:
+            """Return the names of saved ballistic profiles."""
+            return sorted(self.profile_storage.load_profiles().keys())
+        def export_ballistic_profiles(self, file_path: str, profile_names: Optional[List[str]] = None) -> List[str]:
+            """Export selected ballistic profiles to a JSON file."""
+            exported = self.profile_storage.export_profiles(file_path, profile_names)
+            self.status_message.emit(f"Exported {len(exported)} ballistic profile(s)")
+            self.log_user_action(
+                "ballistic_profiles_exported",
+                {"count": len(exported), "file_path": str(file_path)},
+            )
+            return exported
+        def import_ballistic_profiles(self, file_path: str, overwrite: bool = False) -> BallisticProfileImportReport:
+            """Import ballistic profiles from disk."""
+            report = self.profile_storage.import_profiles(file_path, overwrite=overwrite)
+            if report.total_imported:
+                message = f"Imported {report.total_imported} ballistic profile(s)"
             else:
-                spin.setValue(float(coerced))
-        apply_spin(self.temperature_spin, environment.temperature)
-        apply_spin(self.pressure_spin, environment.pressure)
-        apply_spin(self.humidity_spin, environment.humidity)
-        apply_spin(self.altitude_spin, environment.altitude)
-        apply_spin(self.wind_speed_spin, environment.wind_speed)
-        apply_spin(self.wind_direction_spin, environment.wind_direction)
-        apply_spin(self.zero_distance_spin, profile.zero_distance)
-        apply_spin(self.max_range_spin, profile.max_range)
-        apply_spin(self.vital_zone_spin, profile.vital_zone_diameter)
-        self.status_message.emit(f"Loaded ballistic profile '{profile.name}'")
-        self.log_user_action("ballistic_profile_loaded", {"profile": profile.name})
-        return profile
-    def list_ballistic_profiles(self) -> List[str]:
-        """Return the names of saved ballistic profiles."""
-        return sorted(self.profile_storage.load_profiles().keys())
-    def export_ballistic_profiles(self, file_path: str, profile_names: Optional[List[str]] = None) -> List[str]:
-        """Export selected ballistic profiles to a JSON file."""
-        exported = self.profile_storage.export_profiles(file_path, profile_names)
-        self.status_message.emit(f"Exported {len(exported)} ballistic profile(s)")
-        self.log_user_action(
-            "ballistic_profiles_exported",
-            {"count": len(exported), "file_path": str(file_path)},
-        )
-        return exported
-    def import_ballistic_profiles(self, file_path: str, overwrite: bool = False) -> BallisticProfileImportReport:
-        """Import ballistic profiles from disk."""
-        report = self.profile_storage.import_profiles(file_path, overwrite=overwrite)
-        if report.total_imported:
-            message = f"Imported {report.total_imported} ballistic profile(s)"
-        else:
-            message = "No ballistic profiles were imported"
-        self.status_message.emit(message)
-        self.log_user_action(
-            "ballistic_profiles_imported",
-            {
-                "count": report.total_imported,
-                "skipped": len(report.skipped),
-                "file_path": str(file_path),
-                "overwrite": overwrite,
-            },
-        )
-        return report
-    def get_description(self) -> str:
-        """Return a description of this module's functionality."""
-        return "Advanced ballistics calculator with environmental corrections, trajectory modeling, and comprehensive ammunition database."
-# Utility functions for ballistics calculations
-def meters_to_yards(meters: float) -> float:
-    """Convert meters to yards."""
-    return meters * 1.09361
-def yards_to_meters(yards: float) -> float:
-    """Convert yards to meters."""
-    return yards * 0.9144
-def mps_to_fps(mps: float) -> float:
-    """Convert meters per second to feet per second."""
-    return mps * 3.28084
-def fps_to_mps(fps: float) -> float:
-    """Convert feet per second to meters per second."""
-    return fps * 0.3048
-def joules_to_ft_lbs(joules: float) -> float:
-    """Convert joules to foot-pounds."""
-    return joules * 0.737562
-def ft_lbs_to_joules(ft_lbs: float) -> float:
-    """Convert foot-pounds to joules."""
-    return ft_lbs * 1.35582
-def grains_to_grams(grains: float) -> float:
-    """Convert grains to grams."""
-    return grains * 0.0647989
-def grams_to_grains(grams: float) -> float:
-    """Convert grams to grains."""
-    return grams * 15.4324
-def celsius_to_fahrenheit(celsius: float) -> float:
-    """Convert Celsius to Fahrenheit."""
-    return (celsius * 9/5) + 32
-def fahrenheit_to_celsius(fahrenheit: float) -> float:
-    """Convert Fahrenheit to Celsius."""
-    return (fahrenheit - 32) * 5/9
-def hpa_to_inhg(hpa: float) -> float:
-    """Convert hectopascals to inches of mercury."""
-    return hpa * 0.02953
-def inhg_to_hpa(inhg: float) -> float:
-    """Convert inches of mercury to hectopascals."""
-    return inhg * 33.8639
-def calculate_sectional_density(bullet_weight_grains: float, diameter_inches: float) -> float:
-    """Calculate sectional density."""
-    return bullet_weight_grains / (7000 * diameter_inches ** 2)
-def estimate_bc_from_sd(sectional_density: float, bullet_type: str = "spitzer") -> float:
-    """Estimate ballistic coefficient from sectional density."""
-    # Very rough estimation - actual BC depends on bullet shape
-    base_multiplier = {
-        "spitzer": 0.5,
-        "boat_tail": 0.55,
-        "flat_base": 0.45,
-        "round_nose": 0.35
-    }.get(bullet_type.lower(), 0.5)
-    return sectional_density * base_multiplier
-def calculate_kinetic_energy(mass_kg: float, velocity_mps: float) -> float:
-    """Calculate kinetic energy in joules."""
-    return 0.5 * mass_kg * velocity_mps ** 2
-def calculate_momentum(mass_kg: float, velocity_mps: float) -> float:
-    """Calculate momentum in kgâ‹…m/s."""
-    return mass_kg * velocity_mps
-def calculate_taylor_ko_factor(bullet_weight_grains: float, velocity_fps: float, diameter_inches: float) -> float:
-    """Calculate Taylor Knock-Out factor."""
-    return (bullet_weight_grains * velocity_fps * diameter_inches) / 7000
-def estimate_recoil_energy(bullet_weight_grains: float, powder_weight_grains: float, 
-                          muzzle_velocity_fps: float, rifle_weight_lbs: float) -> float:
-    """Estimate recoil energy in foot-pounds."""
-    # Simplified recoil calculation
-    bullet_momentum = bullet_weight_grains * muzzle_velocity_fps
-    powder_momentum = powder_weight_grains * 4000  # Approximate gas velocity
-    total_momentum = (bullet_momentum + powder_momentum) / 7000  # Convert to lbâ‹…ft/s
-    rifle_weight_slugs = rifle_weight_lbs / 32.174
-    recoil_velocity = total_momentum / rifle_weight_slugs
-    return 0.5 * rifle_weight_slugs * recoil_velocity ** 2
-def atmospheric_correction_factor(temperature_f: float, pressure_inhg: float, 
-                                humidity_percent: float) -> float:
-    """Calculate atmospheric correction factor for ballistic coefficient."""
-    # Standard conditions: 59Â°F, 29.92 inHg, 78% humidity
-    temp_factor = (459.4 + temperature_f) / 518.4  # Rankine scale
-    pressure_factor = pressure_inhg / 29.92
-    humidity_factor = (100 - humidity_percent) / 22  # Simplified
-    return (pressure_factor / temp_factor) * humidity_factor
-# Ballistics formulas and constants
-GRAVITY_METRIC = 9.80665  # m/sÂ²
-GRAVITY_IMPERIAL = 32.174  # ft/sÂ²
-STANDARD_TEMPERATURE_C = 15.0  # Â°C
-STANDARD_TEMPERATURE_F = 59.0  # Â°F
-STANDARD_PRESSURE_HPA = 1013.25  # hPa
-STANDARD_PRESSURE_INHG = 29.92  # inHg
-SPEED_OF_SOUND_STP = 331.3  # m/s at standard temperature and pressure
+                message = "No ballistic profiles were imported"
+            self.status_message.emit(message)
+            self.log_user_action(
+                "ballistic_profiles_imported",
+                {
+                    "count": report.total_imported,
+                    "skipped": len(report.skipped),
+                    "file_path": str(file_path),
+                    "overwrite": overwrite,
+                },
+            )
+            return report
+        def get_description(self) -> str:
+            """Return a description of this module's functionality."""
+            return "Advanced ballistics calculator with environmental corrections, trajectory modeling, and comprehensive ammunition database."
+    # Utility functions for ballistics calculations
+    def meters_to_yards(meters: float) -> float:
+        """Convert meters to yards."""
+        return meters * 1.09361
+    def yards_to_meters(yards: float) -> float:
+        """Convert yards to meters."""
+        return yards * 0.9144
+    def mps_to_fps(mps: float) -> float:
+        """Convert meters per second to feet per second."""
+        return mps * 3.28084
+    def fps_to_mps(fps: float) -> float:
+        """Convert feet per second to meters per second."""
+        return fps * 0.3048
+    def joules_to_ft_lbs(joules: float) -> float:
+        """Convert joules to foot-pounds."""
+        return joules * 0.737562
+    def ft_lbs_to_joules(ft_lbs: float) -> float:
+        """Convert foot-pounds to joules."""
+        return ft_lbs * 1.35582
+    def grains_to_grams(grains: float) -> float:
+        """Convert grains to grams."""
+        return grains * 0.0647989
+    def grams_to_grains(grams: float) -> float:
+        """Convert grams to grains."""
+        return grams * 15.4324
+    def celsius_to_fahrenheit(celsius: float) -> float:
+        """Convert Celsius to Fahrenheit."""
+        return (celsius * 9/5) + 32
+    def fahrenheit_to_celsius(fahrenheit: float) -> float:
+        """Convert Fahrenheit to Celsius."""
+        return (fahrenheit - 32) * 5/9
+    def hpa_to_inhg(hpa: float) -> float:
+        """Convert hectopascals to inches of mercury."""
+        return hpa * 0.02953
+    def inhg_to_hpa(inhg: float) -> float:
+        """Convert inches of mercury to hectopascals."""
+        return inhg * 33.8639
+    def calculate_sectional_density(bullet_weight_grains: float, diameter_inches: float) -> float:
+        """Calculate sectional density."""
+        return bullet_weight_grains / (7000 * diameter_inches ** 2)
+    def estimate_bc_from_sd(sectional_density: float, bullet_type: str = "spitzer") -> float:
+        """Estimate ballistic coefficient from sectional density."""
+        # Very rough estimation - actual BC depends on bullet shape
+        base_multiplier = {
+            "spitzer": 0.5,
+            "boat_tail": 0.55,
+            "flat_base": 0.45,
+            "round_nose": 0.35
+        }.get(bullet_type.lower(), 0.5)
+        return sectional_density * base_multiplier
+    def calculate_kinetic_energy(mass_kg: float, velocity_mps: float) -> float:
+        """Calculate kinetic energy in joules."""
+        return 0.5 * mass_kg * velocity_mps ** 2
+    def calculate_momentum(mass_kg: float, velocity_mps: float) -> float:
+        """Calculate momentum in kgâ‹…m/s."""
+        return mass_kg * velocity_mps
+    def calculate_taylor_ko_factor(bullet_weight_grains: float, velocity_fps: float, diameter_inches: float) -> float:
+        """Calculate Taylor Knock-Out factor."""
+        return (bullet_weight_grains * velocity_fps * diameter_inches) / 7000
+    def estimate_recoil_energy(bullet_weight_grains: float, powder_weight_grains: float, 
+                              muzzle_velocity_fps: float, rifle_weight_lbs: float) -> float:
+        """Estimate recoil energy in foot-pounds."""
+        # Simplified recoil calculation
+        bullet_momentum = bullet_weight_grains * muzzle_velocity_fps
+        powder_momentum = powder_weight_grains * 4000  # Approximate gas velocity
+        total_momentum = (bullet_momentum + powder_momentum) / 7000  # Convert to lbâ‹…ft/s
+        rifle_weight_slugs = rifle_weight_lbs / 32.174
+        recoil_velocity = total_momentum / rifle_weight_slugs
+        return 0.5 * rifle_weight_slugs * recoil_velocity ** 2
+    def atmospheric_correction_factor(temperature_f: float, pressure_inhg: float, 
+                                    humidity_percent: float) -> float:
+        """Calculate atmospheric correction factor for ballistic coefficient."""
+        # Standard conditions: 59Â°F, 29.92 inHg, 78% humidity
+        temp_factor = (459.4 + temperature_f) / 518.4  # Rankine scale
+        pressure_factor = pressure_inhg / 29.92
+        humidity_factor = (100 - humidity_percent) / 22  # Simplified
+        return (pressure_factor / temp_factor) * humidity_factor
+    # Ballistics formulas and constants
+    GRAVITY_METRIC = 9.80665  # m/sÂ²
+    GRAVITY_IMPERIAL = 32.174  # ft/sÂ²
+    STANDARD_TEMPERATURE_C = 15.0  # Â°C
+    STANDARD_TEMPERATURE_F = 59.0  # Â°F
+    STANDARD_PRESSURE_HPA = 1013.25  # hPa
+    STANDARD_PRESSURE_INHG = 29.92  # inHg
+    SPEED_OF_SOUND_STP = 331.3  # m/s at standard temperature and pressure
