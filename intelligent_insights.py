@@ -10,7 +10,15 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from math import exp, log
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
+from typing import (
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+)
 
 from game_log import (
     EntryType,
@@ -39,6 +47,34 @@ class MovementPrediction:
     peak_hours: Sequence[int]
     hourly_intensity: Mapping[int, float]
     hotspot_locations: Sequence[str]
+
+
+@dataclass(frozen=True)
+class PerformanceBreakdown:
+    """Aggregated performance statistics for a specific category."""
+
+    label: str
+    attempts: int
+    successes: int
+    success_rate: float
+
+
+@dataclass(frozen=True)
+class AfterActionReport:
+    """Structured summary of a hunt session portfolio."""
+
+    total_entries: int
+    encounter_entries: int
+    harvests: int
+    sightings: int
+    scouting_sessions: int
+    harvest_success_rate: float
+    top_locations: Sequence[PerformanceBreakdown]
+    weather_outcomes: Sequence[PerformanceBreakdown]
+    improvement_opportunities: Sequence[str]
+
+
+_UNKNOWN_LOCATION_LABEL = "Unspecified Location"
 
 
 class HistoricalHuntInsightModel:
@@ -243,3 +279,170 @@ class HistoricalHuntInsightModel:
             if match_ratio > 0:
                 summaries[feature] = f"{match_ratio:.0%} historical match for {target_value}"
         return summaries
+
+
+def generate_after_action_report(entries: Sequence[GameEntry]) -> AfterActionReport:
+    """Build a structured after-action report from historical entries."""
+
+    history = list(entries)
+    for entry in history:
+        if not isinstance(entry, GameEntry):
+            raise TypeError("entries must contain GameEntry instances")
+
+    total_entries = len(history)
+    encounter_types = {EntryType.SIGHTING, EntryType.HARVEST, EntryType.TRACK}
+    encounter_entries = [entry for entry in history if entry.entry_type in encounter_types]
+    encounter_count = len(encounter_entries)
+
+    harvests = sum(1 for entry in history if entry.entry_type == EntryType.HARVEST)
+    sightings = sum(1 for entry in history if entry.entry_type == EntryType.SIGHTING)
+    scouting_sessions = sum(1 for entry in history if entry.entry_type == EntryType.SCOUT)
+
+    location_attempts: MutableMapping[str, int] = defaultdict(int)
+    location_successes: MutableMapping[str, int] = defaultdict(int)
+    weather_attempts: MutableMapping[str, int] = defaultdict(int)
+    weather_successes: MutableMapping[str, int] = defaultdict(int)
+
+    for entry in encounter_entries:
+        location_label = _normalise_location_label(entry)
+        location_attempts[location_label] += 1
+        if entry.entry_type == EntryType.HARVEST:
+            location_successes[location_label] += 1
+
+        weather_label = (
+            entry.weather.condition.value if entry.weather else WeatherCondition.CLEAR.value
+        )
+        weather_attempts[weather_label] += 1
+        if entry.entry_type == EntryType.HARVEST:
+            weather_successes[weather_label] += 1
+
+    top_locations = _build_breakdowns(location_attempts, location_successes)
+    weather_outcomes = _build_breakdowns(weather_attempts, weather_successes)
+
+    harvest_success_rate = (
+        harvests / encounter_count if encounter_count > 0 else 0.0
+    )
+
+    improvement_opportunities = _identify_improvements(
+        total_entries=total_entries,
+        encounter_count=encounter_count,
+        harvest_success_rate=harvest_success_rate,
+        harvests=harvests,
+        scouting_sessions=scouting_sessions,
+        location_breakdowns=top_locations,
+        weather_breakdowns=weather_outcomes,
+    )
+
+    return AfterActionReport(
+        total_entries=total_entries,
+        encounter_entries=encounter_count,
+        harvests=harvests,
+        sightings=sightings,
+        scouting_sessions=scouting_sessions,
+        harvest_success_rate=harvest_success_rate,
+        top_locations=top_locations,
+        weather_outcomes=weather_outcomes,
+        improvement_opportunities=improvement_opportunities,
+    )
+
+
+def _build_breakdowns(
+    attempts: Mapping[str, int], successes: Mapping[str, int]
+) -> List[PerformanceBreakdown]:
+    breakdowns: List[PerformanceBreakdown] = []
+    for label, attempts_count in attempts.items():
+        success_count = successes.get(label, 0)
+        success_rate = success_count / attempts_count if attempts_count else 0.0
+        breakdowns.append(
+            PerformanceBreakdown(
+                label=label,
+                attempts=attempts_count,
+                successes=success_count,
+                success_rate=success_rate,
+            )
+        )
+
+    breakdowns.sort(
+        key=lambda breakdown: (
+            -breakdown.success_rate,
+            -breakdown.successes,
+            -breakdown.attempts,
+            breakdown.label,
+        )
+    )
+    return breakdowns
+
+
+def _normalise_location_label(entry: GameEntry) -> str:
+    if entry.location:
+        if entry.location.name and entry.location.name.strip():
+            return entry.location.name.strip()
+        if entry.location.description and entry.location.description.strip():
+            return entry.location.description.strip()
+    return _UNKNOWN_LOCATION_LABEL
+
+
+def _identify_improvements(
+    *,
+    total_entries: int,
+    encounter_count: int,
+    harvest_success_rate: float,
+    harvests: int,
+    scouting_sessions: int,
+    location_breakdowns: Sequence[PerformanceBreakdown],
+    weather_breakdowns: Sequence[PerformanceBreakdown],
+) -> List[str]:
+    improvements: List[str] = []
+
+    def _add(message: str) -> None:
+        if message and message not in improvements:
+            improvements.append(message)
+
+    if total_entries == 0:
+        _add(
+            "No hunt entries were logged; capture sightings, tracks, or harvests to generate after-action insights."
+        )
+    else:
+        if encounter_count == 0:
+            _add(
+                "No encounter entries were logged; record sightings, tracks, or harvests to unlock actionable insights."
+            )
+        else:
+            if harvest_success_rate < 0.3:
+                percentage = f"{harvest_success_rate:.0%}"
+                _add(
+                    f"Harvest success rate was {percentage} across {encounter_count} encounters; evaluate stand setups and follow-up on high-activity zones."
+                )
+
+            for breakdown in location_breakdowns:
+                if breakdown.attempts >= 2 and breakdown.success_rate < 0.2:
+                    _add(
+                        f"{breakdown.label} recorded {breakdown.attempts} encounters but only {breakdown.successes} harvests; consider repositioning or limiting time spent there."
+                    )
+                if len(improvements) >= 3:
+                    break
+
+            for weather in weather_breakdowns:
+                if weather.attempts >= 3 and weather.success_rate < 0.2:
+                    percentage = f"{weather.success_rate:.0%}"
+                    _add(
+                        f"Hunts during {weather.label.lower()} conditions yielded {percentage} success across {weather.attempts} encounters; adjust tactics or scheduling for that weather pattern."
+                    )
+                    break
+
+    if total_entries > 0:
+        if scouting_sessions == 0:
+            _add(
+                "No scouting sessions were logged; schedule dedicated reconnaissance to refresh movement intelligence."
+            )
+        elif (scouting_sessions / total_entries) < 0.15:
+            _add(
+                f"Only {scouting_sessions} of {total_entries} entries were scouting sessions; increase reconnaissance to broaden future opportunities."
+            )
+
+    if not improvements:
+        _add(
+            "Strong performance across recorded hunts; continue reinforcing successful tactics."
+        )
+
+    return improvements[:4]
