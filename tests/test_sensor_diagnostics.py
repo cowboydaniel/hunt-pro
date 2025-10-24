@@ -1,6 +1,5 @@
 """Tests for the sensor diagnostics engine."""
 
-from sensor_diagnostics import SensorDiagnosticsEngine
 from device_manager import (
     BluetoothDetails,
     DeviceCapability,
@@ -8,6 +7,7 @@ from device_manager import (
     DeviceType,
     PairedDevice,
 )
+from sensor_diagnostics import SensorDiagnosticsEngine
 
 
 def _make_device(
