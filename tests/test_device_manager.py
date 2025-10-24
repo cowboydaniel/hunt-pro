@@ -1,11 +1,13 @@
 import pytest
 
 from device_manager import (
+    AdapterContribution,
     DeviceCapability,
     DeviceIdentity,
     DeviceManager,
     DevicePairingError,
     DeviceType,
+    RangefinderAdapter,
 )
 
 
@@ -92,3 +94,57 @@ def test_unpair_device_removes_and_logs():
     removed = manager.unpair_device(device.device_id)
     assert removed is device
     assert manager.get_device(device.device_id) is None
+
+
+def test_load_adapter_plugins_registers_contributions(monkeypatch):
+    class VendorRangefinderAdapter(RangefinderAdapter):
+        device_type = DeviceType.RANGEFINDER
+
+        def pair(self, request):  # type: ignore[override]
+            device = super().pair(request)
+            device.metadata["vendor_profile"] = "acme"
+            return device
+
+    class VendorPlugin:
+        api_version = DeviceManager.PLUGIN_API_VERSION
+
+        def create_adapters(self):
+            return [
+                AdapterContribution(
+                    adapter=VendorRangefinderAdapter(),
+                    replace_existing=True,
+                )
+            ]
+
+    class FakeEntryPoint:
+        name = "acme_rangefinder"
+
+        def load(self):
+            return VendorPlugin()
+
+    class FakeEntryPoints(list):
+        def select(self, *, group):
+            if group == DeviceManager.DEFAULT_PLUGIN_GROUP:
+                return self
+            return FakeEntryPoints()
+
+    def fake_entry_points():
+        return FakeEntryPoints([FakeEntryPoint()])
+
+    monkeypatch.setattr("device_manager.metadata", type("MetaModule", (), {"entry_points": staticmethod(fake_entry_points)}))
+
+    manager = DeviceManager(auto_load_plugins=False)
+    registered = manager.load_adapter_plugins()
+
+    assert registered == 1
+
+    device = manager.pair_bluetooth_device(
+        DeviceType.RANGEFINDER,
+        identity=make_identity("RF-777"),
+        address="11:22:33:44:55:66",
+        rssi=-70,
+        services=["huntpro.rangefinder"],
+        metadata={"max_range": 1800},
+    )
+
+    assert device.metadata["vendor_profile"] == "acme"
