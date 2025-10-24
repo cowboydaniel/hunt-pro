@@ -33,6 +33,6 @@ This roadmap is structured as nine progressive phases that build from core stabi
 - Enable push notifications for key events (shots fired, target sightings, environmental alerts).
 - Allow limited offline editing on mobile with reconciliation once connectivity returns.
 ## Phase 9 – Intelligent Insights & Automation
-- Apply machine learning to historical hunts to recommend stands and predict movement patterns.
+- [x] Apply machine learning to historical hunts to recommend stands and predict movement patterns.
 - Deliver adaptive ballistic suggestions based on live sensor input and environmental conditions.
 - Introduce after-action reports that summarize performance and highlight improvement areas.
