@@ -1,7 +1,6 @@
 [build-system]
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
-
 [tool.black]
 line-length = 100
 target-version = ["py310"]
@@ -13,7 +12,6 @@ exclude = [
     "venv/",
     ".venv/",
 ]
-
 [tool.ruff]
 line-length = 100
 target-version = "py310"
@@ -34,7 +32,6 @@ exclude = [
     "venv",
     ".venv",
 ]
-
 [tool.ruff.lint.isort]
 known-first-party = [
     "ballistics",
