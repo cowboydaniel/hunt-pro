@@ -1,5 +1,6 @@
 import pytest
 
+import device_manager
 from device_manager import (
     AdapterContribution,
     DeviceCapability,
@@ -96,6 +97,42 @@ def test_unpair_device_removes_and_logs():
     assert manager.get_device(device.device_id) is None
 
 
+class FakeEntryPoint:
+    name = "plugin.shot_timer"
+
+    @staticmethod
+    def load():
+        return device_manager.ShotTimerAdapter
+
+
+class FakeEntryPoints:
+    def __init__(self, entry_points):
+        self._entry_points = entry_points
+
+    def select(self, *, group):
+        assert group == DeviceManager.PLUGIN_ENTRYPOINT_GROUP
+        return self._entry_points
+
+
+def fake_entry_points():
+    return FakeEntryPoints([FakeEntryPoint()])
+
+
+def test_load_plugin_adapters_registers_entry_points(monkeypatch):
+    monkeypatch.setattr(
+        device_manager.metadata,
+        "entry_points",
+        fake_entry_points,
+    )
+
+    manager = DeviceManager(auto_load_plugins=False)
+    manager._adapters.pop(DeviceType.SHOT_TIMER)
+    manager.load_plugin_adapters()
+
+    assert isinstance(
+        manager._adapters[DeviceType.SHOT_TIMER],
+        device_manager.ShotTimerAdapter,
+    )
 def test_load_adapter_plugins_registers_contributions(monkeypatch):
     class VendorRangefinderAdapter(RangefinderAdapter):
         device_type = DeviceType.RANGEFINDER

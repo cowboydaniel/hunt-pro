@@ -14,8 +14,11 @@ builds on a consistent API.
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from enum import Enum
+from importlib import metadata
+from typing import Dict, Iterable, Iterator, List, MutableMapping, Optional, Protocol, Set
 from typing import (
     Dict,
     Iterable,
@@ -174,7 +177,12 @@ class DeviceAdapterPlugin(Protocol):
 class BluetoothDeviceAdapter(LoggableMixin):
     """Base class providing helpers for Bluetooth-centric adapters."""
 
-    def __init__(self, *, minimum_rssi: int = -90, required_services: Optional[Iterable[str]] = None):
+    def __init__(
+        self,
+        *,
+        minimum_rssi: int = -90,
+        required_services: Optional[Iterable[str]] = None,
+    ):
         super().__init__()
         self._minimum_rssi = minimum_rssi
         self._required_services = list(required_services or [])
@@ -287,6 +295,7 @@ class ShotTimerAdapter(BluetoothDeviceAdapter):
 class DeviceManager(LoggableMixin):
     """Manages the lifecycle of Hunt Pro hardware devices."""
 
+    PLUGIN_ENTRYPOINT_GROUP = "hunt_pro.device_adapters"
     DEFAULT_PLUGIN_GROUP = "hunt_pro.device_adapters"
     PLUGIN_API_VERSION = "1.0"
 
@@ -296,6 +305,7 @@ class DeviceManager(LoggableMixin):
         self._paired_devices: MutableMapping[str, PairedDevice] = {}
         self._register_default_adapters()
         if auto_load_plugins:
+            self.load_plugin_adapters()
             self.load_adapter_plugins()
 
     def _register_default_adapters(self) -> None:
@@ -319,6 +329,72 @@ class DeviceManager(LoggableMixin):
             device_type=adapter.device_type.value,
         )
 
+    def load_plugin_adapters(self) -> None:
+        """Discover and register device adapters provided by plug-ins."""
+
+        for adapter in self._iter_plugin_adapters():
+            try:
+                self.register_adapter(adapter)
+            except ValueError:
+                self.log_warning(
+                    "Plug-in attempted to register duplicate device adapter",
+                    device_type=getattr(adapter.device_type, "value", adapter.device_type),
+                )
+
+    def _iter_plugin_adapters(self) -> Iterator[DeviceAdapter]:
+        """Yield adapters exposed via Python entry points."""
+
+        try:
+            entry_points = metadata.entry_points()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.log_warning(
+                "Failed to discover device adapter plug-ins",
+                error=repr(exc),
+            )
+            return
+
+        if hasattr(entry_points, "select"):
+            candidates = entry_points.select(group=self.PLUGIN_ENTRYPOINT_GROUP)
+        else:  # pragma: no cover - compatibility with older metadata API
+            candidates = entry_points.get(self.PLUGIN_ENTRYPOINT_GROUP, [])
+
+        for entry_point in candidates:
+            adapter = self._create_adapter_from_entry_point(entry_point)
+            if adapter is not None:
+                yield adapter
+
+    def _create_adapter_from_entry_point(self, entry_point) -> Optional[DeviceAdapter]:
+        try:
+            loaded = entry_point.load()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.log_warning(
+                "Failed to load device adapter plug-in",
+                entry_point=getattr(entry_point, "name", repr(entry_point)),
+                error=repr(exc),
+            )
+            return None
+
+        adapter = self._coerce_adapter(loaded)
+        if adapter is None:
+            self.log_warning(
+                "Plug-in did not return a valid DeviceAdapter",
+                entry_point=getattr(entry_point, "name", repr(entry_point)),
+                provided_type=type(loaded).__name__,
+            )
+        return adapter
+
+    def _coerce_adapter(self, candidate) -> Optional[DeviceAdapter]:
+        adapter = candidate
+        if inspect.isclass(adapter):
+            adapter = adapter()
+        elif callable(adapter) and not hasattr(adapter, "device_type"):
+            adapter = adapter()
+
+        device_type = getattr(adapter, "device_type", None)
+        pair_method = getattr(adapter, "pair", None)
+        if isinstance(device_type, DeviceType) and callable(pair_method):
+            return adapter
+        return None
     def load_adapter_plugins(self, *, group: Optional[str] = None) -> int:
         """Discover and register plug-in adapters exposed via entry points."""
 
