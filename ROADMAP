@@ -14,7 +14,7 @@ This roadmap is structured as nine progressive phases that build from core stabi
 - [x] Introduce migration scripts that safely evolve stored data structures across releases.
 ## Phase 4 – Configuration Experience
 - [x] Design a unified settings interface surfaced from `main.py` with clear grouping and tooltips.
-- Add input validation and contextual error messages before persisting configuration changes.
+- [x] Add input validation and contextual error messages before persisting configuration changes.
 - Support profile presets so operators can switch loadouts or regions with a single action.
 ## Phase 5 – Mapping & Navigation Evolution
 - Integrate offline map tile caching with fallback rendering when connectivity is limited.

@@ -29,6 +29,7 @@ from PySide6.QtGui import (
 from logger import get_logger, setup_logger
 from keyboard import VirtualKeyboardManager
 from numpad import VirtualNumpadManager
+from config_validation import validate_configuration, ValidationIssue
 class BaseModule(QWidget):
     """Base class for all Hunt Pro modules."""
     # Enhanced signals
@@ -265,24 +266,57 @@ class SettingsDialog(QDialog):
         self.settings.setValue('display/temperature_units', self.temperature_units_combo.currentText())
         for module_key, checkbox in self.module_checkboxes.items():
             self.settings.setValue(f'modules/{module_key}', checkbox.isChecked())
+    def _collect_settings_preview(self) -> Dict[str, Any]:
+        """Gather the current dialog state into a mapping for validation."""
+
+        return {
+            'call_sign': self.call_sign_edit.text().strip(),
+            'primary_region': self.primary_region_combo.currentText(),
+            'log_retention': self.log_retention_spin.value(),
+            'auto_backup': self.auto_backup_checkbox.isChecked(),
+            'prompt_before_sync': self.prompt_before_sync_checkbox.isChecked(),
+            'launch_on_start': self.launch_on_start_checkbox.isChecked(),
+            'show_tips': self.show_tips_checkbox.isChecked(),
+            'theme': self.theme_combo.currentText(),
+            'font_scale': self.font_scale_spin.value(),
+            'high_contrast': self.high_contrast_checkbox.isChecked(),
+            'distance_units': self.distance_units_combo.currentText(),
+            'temperature_units': self.temperature_units_combo.currentText(),
+            'modules': {
+                module_key: checkbox.isChecked()
+                for module_key, checkbox in self.module_checkboxes.items()
+            },
+        }
+
+    def _widget_for_field(self, field: str) -> Optional[QWidget]:
+        """Return the widget associated with the provided validation field."""
+
+        mapping = {
+            'call_sign': self.call_sign_edit,
+            'log_retention': self.log_retention_spin,
+            'font_scale': self.font_scale_spin,
+            'auto_backup': self.auto_backup_checkbox,
+            'prompt_before_sync': self.prompt_before_sync_checkbox,
+            'modules': next(iter(self.module_checkboxes.values()), None),
+        }
+        return mapping.get(field)
+
+    def _show_validation_issue(self, issue: ValidationIssue):
+        """Display a contextual validation warning and focus the related widget."""
+
+        QMessageBox.warning(self, issue.title, issue.message)
+        widget = self._widget_for_field(issue.field)
+        if widget is not None:
+            widget.setFocus()
+
     def validate_inputs(self) -> bool:
-        call_sign = self.call_sign_edit.text().strip()
-        if len(call_sign) < 3:
-            QMessageBox.warning(
-                self,
-                'Invalid Call Sign',
-                'Your call sign should be at least three characters to help teammates recognize you.'
-            )
-            self.call_sign_edit.setFocus()
-            return False
-        retention = self.log_retention_spin.value()
-        if retention < 7:
-            QMessageBox.warning(
-                self,
-                'Retention Too Low',
-                'Retaining logs for fewer than seven days risks losing compliance history.'
-            )
-            self.log_retention_spin.setFocus()
+        preview = self._collect_settings_preview()
+        issues = validate_configuration(
+            preview,
+            available_modules=self.module_checkboxes.keys(),
+        )
+        if issues:
+            self._show_validation_issue(issues[0])
             return False
         return True
     def accept(self):
