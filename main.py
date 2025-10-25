@@ -145,7 +145,7 @@ class BaseModule(QWidget):
         self.setMinimumSize(800, 600)
         self.setAttribute(Qt.WA_AcceptTouchEvents, True)
         # Initialize error handling
-        self.error_occurred.connect(self._handle_error)
+        self.error_occurred.connect(self._get_error_handler())
     def initialize(self) -> bool:
         """Initialize the module. Override in subclasses."""
         try:
@@ -580,11 +580,24 @@ class SettingsDialog(QDialog):
     def is_initialized(self) -> bool:
         """Check if module is properly initialized."""
         return self._initialized
-    def _handle_error(self, title: str, message: str):
-        """Internal error handler to track error statistics."""
+    def _get_error_handler(self):
+        """Return the error handler callback for the module."""
+        handler = getattr(self, "_handle_error", None)
+        if handler is None:
+            handler = self._default_handle_error
+            # Store handler on the instance for future lookups and introspection
+            setattr(self, "_handle_error", handler)
+        return handler
+
+    def _default_handle_error(self, title: str, message: str):
+        """Default internal error handler to track error statistics."""
         self._error_count += 1
         self._last_error = f"{title}: {message}"
         self.logger.error(f"Module error in {self.module_name}: {title} - {message}")
+
+    def _handle_error(self, title: str, message: str):
+        """Internal error handler to track error statistics."""
+        self._default_handle_error(title, message)
     def get_last_error(self) -> Optional[str]:
         """Get the last error that occurred in this module."""
         return self._last_error
