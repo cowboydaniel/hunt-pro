@@ -185,6 +185,23 @@ class BaseModule(QWidget):
                 numpad_manager.install_on_widget(widget)
         except Exception as e:
             self.logger.warning(f"Failed to install virtual inputs on {self.module_name}", exception=e)
+
+    def _default_handle_error(self, title: str, message: str):
+        """Fallback error handler used before helpers are injected."""
+        self._error_count += 1
+        self._last_error = f"{title}: {message}"
+        self.logger.error(
+            f"Module error in {self.module_name}: {title} - {message}"
+        )
+
+    def _handle_error(self, title: str, message: str):
+        """Internal hook that defers to the default handler.
+
+        Subclasses may override this to provide richer error handling
+        while still updating the base class diagnostics.
+        """
+
+        self._default_handle_error(title, message)
 class SettingsDialog(QDialog):
     # Unified application settings interface with grouped controls.
     def __init__(self, parent: Optional[QWidget], settings: QSettings):
