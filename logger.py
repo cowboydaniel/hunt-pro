@@ -127,9 +127,18 @@ class HuntProLogger:
     def _log(self, level: int, message: str, category: Optional[LogCategory] = None, 
              exception: Optional[Exception] = None, **kwargs):
         """Internal logging method with enhanced features."""
+        if category is None:
+            category_name = 'GENERAL'
+        elif isinstance(category, LogCategory):
+            category_name = category.name
+        elif isinstance(category, str):
+            category_name = category
+        else:
+            category_name = getattr(category, 'name', str(category))
+
         extra = {
             'session_id': self.session_id,
-            'category': category.name if category else 'GENERAL'
+            'category': category_name,
         }
         # Add custom fields
         for key, value in kwargs.items():
