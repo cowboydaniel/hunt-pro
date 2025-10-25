@@ -19,19 +19,111 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum, auto
 from datetime import datetime
 import uuid
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
-    QTabWidget, QPushButton, QLabel, QLineEdit, QSpinBox, QDoubleSpinBox,
-    QComboBox, QTextEdit, QTableWidget, QTableWidgetItem, QGroupBox,
-    QScrollArea, QFrame, QSlider, QCheckBox, QProgressBar, QListWidget,
-    QListWidgetItem, QHeaderView, QMessageBox, QSplitter
-)
-from PySide6.QtCore import (
-    Qt, Signal, QTimer, QThread, QObject, QSettings, QPointF
-)
-from PySide6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QPixmap
-from PySide6.QtCharts import QChart, QChartView, QScatterSeries, QLineSeries
-from main import BaseModule
+try:  # pragma: no cover - optional Qt dependency
+    from PySide6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
+        QTabWidget, QPushButton, QLabel, QLineEdit, QSpinBox, QDoubleSpinBox,
+        QComboBox, QTextEdit, QTableWidget, QTableWidgetItem, QGroupBox,
+        QScrollArea, QFrame, QSlider, QCheckBox, QProgressBar, QListWidget,
+        QListWidgetItem, QHeaderView, QMessageBox, QSplitter
+    )
+    from PySide6.QtCore import (
+        Qt, Signal, QTimer, QThread, QObject, QSettings, QPointF
+    )
+    from PySide6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QPixmap
+    from main import BaseModule
+    _QT_AVAILABLE = True
+except ImportError:  # pragma: no cover - executed when Qt bindings unavailable
+    class _QtStub:
+        def __init__(self, *_, **__):
+            pass
+
+        def __call__(self, *_, **__):
+            return _QtStub()
+
+        def __getattr__(self, _):
+            return _QtStub()
+
+        def __bool__(self):
+            return False
+
+    class _SignalStub:
+        def connect(self, *_, **__):
+            pass
+
+        def emit(self, *_, **__):
+            pass
+
+    def Signal(*_, **__):  # type: ignore[override]
+        return _SignalStub()
+
+    class _TimerStub(_QtStub):
+        def __init__(self, *_, **__):
+            super().__init__()
+            self.timeout = _SignalStub()
+
+        def setInterval(self, *_, **__):
+            pass
+
+        def start(self, *_, **__):
+            pass
+
+        def stop(self, *_, **__):
+            pass
+
+    class _ThreadStub(_QtStub):
+        def start(self, *_, **__):
+            pass
+
+        def quit(self, *_, **__):
+            pass
+
+        def wait(self, *_, **__):
+            pass
+
+    class _SettingsStub(dict):
+        def value(self, key, default=None, type=None):  # type: ignore[override]
+            return super().get(key, default)
+
+        def setValue(self, key, value):  # type: ignore[override]
+            self[key] = value
+
+    class _QtNamespace:
+        Horizontal = 1
+        Vertical = 2
+        AlignRight = 0
+        AlignLeft = 0
+        AlignBottom = 0
+        AlignCenter = 0
+        KeepAspectRatio = 0
+        SmoothTransformation = 0
+
+    QWidget = QVBoxLayout = QHBoxLayout = QFormLayout = QGridLayout = _QtStub
+    QTabWidget = QPushButton = QLabel = QLineEdit = QSpinBox = QDoubleSpinBox = _QtStub
+    QComboBox = QTextEdit = QTableWidget = QTableWidgetItem = QGroupBox = _QtStub
+    QScrollArea = QFrame = QSlider = QCheckBox = QProgressBar = _QtStub
+    QListWidget = QListWidgetItem = QHeaderView = QMessageBox = QSplitter = _QtStub
+    QTimer = _TimerStub
+    QThread = _ThreadStub
+    QObject = _QtStub
+    QSettings = _SettingsStub
+    QPointF = _QtStub
+    Qt = _QtNamespace()
+    QFont = QColor = QPainter = QPen = QBrush = QPixmap = _QtStub
+    class _BaseModuleStub:
+        def __init__(self, *_, **__):
+            pass
+
+    BaseModule = _BaseModuleStub  # type: ignore[assignment]
+    _QT_AVAILABLE = False
+try:
+    from PySide6.QtCharts import QChart, QChartView, QScatterSeries, QLineSeries
+    _NAV_QT_CHARTS_AVAILABLE = True
+except ImportError:  # pragma: no cover - charts optional at runtime
+    QChart = QChartView = QScatterSeries = QLineSeries = None  # type: ignore
+    _NAV_QT_CHARTS_AVAILABLE = False
+if _QT_AVAILABLE:
+    from main import BaseModule
 from logger import get_logger, LoggableMixin
 from map_tile_cache import CachedTile, MapTileCache, TileSource
 class WaypointType(Enum):
@@ -757,9 +849,19 @@ class NavigationModule(BaseModule):
         overlay_group.setLayout(overlay_layout)
         layout.addWidget(overlay_group)
         # Map view (placeholder - in a real implementation this would be a proper map widget)
-        self.map_chart_view = QChartView()
-        self.map_chart_view.setMinimumHeight(400)
-        layout.addWidget(self.map_chart_view)
+        if _NAV_QT_CHARTS_AVAILABLE and QChartView is not None:
+            self.map_chart_view = QChartView()
+            self.map_chart_view.setMinimumHeight(400)
+            layout.addWidget(self.map_chart_view)
+        else:
+            self.map_chart_view = None
+            placeholder = QLabel(
+                "QtCharts is not available. Map visualisation will be shown as textual summaries only."
+            )
+            placeholder.setWordWrap(True)
+            placeholder.setAlignment(Qt.AlignCenter)
+            placeholder.setMinimumHeight(200)
+            layout.addWidget(placeholder)
         self.map_status_label = QLabel("Map tiles will be cached for offline use once loaded.")
         self.map_status_label.setObjectName("statusLabel")
         layout.addWidget(self.map_status_label)
@@ -1158,6 +1260,20 @@ class NavigationModule(BaseModule):
     def update_map_display(self, tile: Optional[CachedTile] = None):
         """Update the map display with waypoints, overlays, tracks, and cached tiles."""
 
+        if not _NAV_QT_CHARTS_AVAILABLE or QChart is None or QScatterSeries is None:
+            if tile:
+                status_messages = {
+                    TileSource.NETWORK: "Live map tile downloaded and cached for offline use.",
+                    TileSource.CACHE: "Loaded cached map tile for offline navigation.",
+                    TileSource.FALLBACK: "Offline placeholder map tile shown (network unavailable).",
+                }
+                self.map_status_label.setText(status_messages[tile.source])
+            else:
+                self.map_status_label.setText(
+                    "Map overlay unavailable without QtCharts. Waypoints and tracks remain accessible via tables."
+                )
+            return
+
         try:
             chart = QChart()
             chart.setTitle("Navigation Map")
@@ -1226,7 +1342,8 @@ class NavigationModule(BaseModule):
                 self.map_status_label.setText(status_messages[tile.source])
             else:
                 self.map_status_label.setText("Map display updated.")
-            self.map_chart_view.setChart(chart)
+            if self.map_chart_view is not None:
+                self.map_chart_view.setChart(chart)
         except Exception as e:
             self.log_error("Failed to update map display", exception=e)
     def _category_color(self, category: POICategory) -> QColor:
