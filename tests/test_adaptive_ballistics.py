@@ -49,10 +49,10 @@ def test_adaptive_wind_and_environment_suggestions():
         signal_quality=80,
         battery_level=90,
         metrics=[
-            SensorMetric("Ambient temperature", "8.5 Â°C"),
+            SensorMetric("Ambient temperature", "8.5 degC"),
             SensorMetric("Relative humidity", "72 %"),
             SensorMetric("Wind speed", "6.4 m/s"),
-            SensorMetric("Wind direction", "95Â°"),
+            SensorMetric("Wind direction", "95 deg"),
             SensorMetric("Barometric pressure", "994.5 hPa"),
         ],
         alerts=[],
@@ -87,7 +87,7 @@ def test_range_and_inclination_suggestions():
         battery_level=88,
         metrics=[
             SensorMetric("Range offset", "+0.6 yd"),
-            SensorMetric("Inclination drift", "-0.72Â°"),
+            SensorMetric("Inclination drift", "-0.72 deg"),
         ],
         alerts=[],
         calibration_recommended=True,

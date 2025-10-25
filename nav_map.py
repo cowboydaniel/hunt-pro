@@ -191,7 +191,7 @@ class GPSCoordinate:
         degrees = int(decimal)
         minutes = int((decimal - degrees) * 60)
         seconds = ((decimal - degrees) * 60 - minutes) * 60
-        return f"{degrees}Â° {minutes}' {seconds:.2f}\" {direction}"
+        return f"{degrees} deg {minutes}' {seconds:.2f}\" {direction}"
     def distance_to(self, other: 'GPSCoordinate') -> float:
         """Calculate distance to another coordinate in meters using Haversine formula."""
         lat1, lon1 = math.radians(self.latitude), math.radians(self.longitude)
@@ -227,7 +227,7 @@ class Waypoint:
     visit_count: int = 0
     last_visited: Optional[float] = None
     color: str = "#FF0000"
-    symbol: str = "ðŸš©"
+    symbol: str = "Flag"
     def __post_init__(self):
         if not self.id:
             self.id = str(uuid.uuid4())
@@ -646,10 +646,10 @@ class NavigationModule(BaseModule):
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget)
         # Create tabs
-        self.tab_widget.addTab(self._create_navigation_tab(), "ðŸ§­ Navigation")
-        self.tab_widget.addTab(self._create_waypoints_tab(), "ðŸ“ Waypoints")
-        self.tab_widget.addTab(self._create_tracking_tab(), "ðŸ“± Tracking")
-        self.tab_widget.addTab(self._create_map_tab(), "ðŸ—ºï¸ Map")
+        self.tab_widget.addTab(self._create_navigation_tab(), "Navigation")
+        self.tab_widget.addTab(self._create_waypoints_tab(), "Waypoints")
+        self.tab_widget.addTab(self._create_tracking_tab(), "Tracking")
+        self.tab_widget.addTab(self._create_map_tab(), "Map")
         # Apply styling
         self.apply_styling()
     def _create_navigation_tab(self) -> QWidget:
@@ -657,7 +657,7 @@ class NavigationModule(BaseModule):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         # GPS status group
-        gps_group = QGroupBox("ðŸ“¡ GPS Status")
+        gps_group = QGroupBox("GPS Status")
         gps_layout = QFormLayout()
         self.gps_status_label = QLabel("GPS Inactive")
         self.gps_status_label.setObjectName("statusLabel")
@@ -672,11 +672,11 @@ class NavigationModule(BaseModule):
         gps_layout.addRow("Accuracy:", self.accuracy_label)
         # GPS control buttons
         gps_buttons_layout = QHBoxLayout()
-        self.start_gps_btn = QPushButton("ðŸ›°ï¸ Start GPS")
+        self.start_gps_btn = QPushButton("Start GPS")
         self.start_gps_btn.setObjectName("primary")
         self.start_gps_btn.clicked.connect(self.start_gps)
         gps_buttons_layout.addWidget(self.start_gps_btn)
-        self.stop_gps_btn = QPushButton("â¹ï¸ Stop GPS")
+        self.stop_gps_btn = QPushButton("Stop GPS")
         self.stop_gps_btn.setObjectName("secondary")
         self.stop_gps_btn.setEnabled(False)
         self.stop_gps_btn.clicked.connect(self.stop_gps)
@@ -685,14 +685,14 @@ class NavigationModule(BaseModule):
         gps_group.setLayout(gps_layout)
         layout.addWidget(gps_group)
         # Compass widget
-        compass_group = QGroupBox("ðŸ§­ Compass")
+        compass_group = QGroupBox("Compass")
         compass_layout = QVBoxLayout()
         self.compass_widget = CompassWidget()
         compass_layout.addWidget(self.compass_widget)
         compass_group.setLayout(compass_layout)
         layout.addWidget(compass_group)
         # Navigation to waypoint
-        nav_group = QGroupBox("ðŸŽ¯ Navigate to Waypoint")
+        nav_group = QGroupBox("Navigate to Waypoint")
         nav_layout = QFormLayout()
         self.target_waypoint_combo = QComboBox()
         self.target_waypoint_combo.currentIndexChanged.connect(self.on_target_waypoint_changed)
@@ -710,7 +710,7 @@ class NavigationModule(BaseModule):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         # Waypoint creation group
-        create_group = QGroupBox("âž• Create Waypoint")
+        create_group = QGroupBox("Create Waypoint")
         create_layout = QFormLayout()
         self.waypoint_name_edit = QLineEdit()
         self.waypoint_name_edit.setPlaceholderText("Enter waypoint name")
@@ -738,10 +738,10 @@ class NavigationModule(BaseModule):
         create_layout.addRow("Coordinates:", coord_layout)
         # Buttons
         waypoint_buttons_layout = QHBoxLayout()
-        self.use_current_pos_btn = QPushButton("ðŸ“ Use Current Position")
+        self.use_current_pos_btn = QPushButton("Use Current Position")
         self.use_current_pos_btn.clicked.connect(self.use_current_position)
         waypoint_buttons_layout.addWidget(self.use_current_pos_btn)
-        self.create_waypoint_btn = QPushButton("âœ… Create Waypoint")
+        self.create_waypoint_btn = QPushButton("Create Waypoint")
         self.create_waypoint_btn.setObjectName("primary")
         self.create_waypoint_btn.clicked.connect(self.create_waypoint)
         waypoint_buttons_layout.addWidget(self.create_waypoint_btn)
@@ -749,7 +749,7 @@ class NavigationModule(BaseModule):
         create_group.setLayout(create_layout)
         layout.addWidget(create_group)
         # Waypoints list
-        waypoints_group = QGroupBox("ðŸ“‹ Saved Waypoints")
+        waypoints_group = QGroupBox("Saved Waypoints")
         waypoints_layout = QVBoxLayout()
         self.waypoints_table = QTableWidget()
         headers = ["Name", "Type", "Coordinates", "Created", "Visited", "Actions"]
@@ -772,18 +772,18 @@ class NavigationModule(BaseModule):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         # Track recording controls
-        record_group = QGroupBox("ðŸŽ¥ Track Recording")
+        record_group = QGroupBox("Track Recording")
         record_layout = QFormLayout()
         self.track_name_edit = QLineEdit()
         self.track_name_edit.setPlaceholderText("Enter track name")
         record_layout.addRow("Track Name:", self.track_name_edit)
         # Recording buttons
         track_buttons_layout = QHBoxLayout()
-        self.start_tracking_btn = QPushButton("â–¶ï¸ Start Recording")
+        self.start_tracking_btn = QPushButton("Start Recording")
         self.start_tracking_btn.setObjectName("primary")
         self.start_tracking_btn.clicked.connect(self.start_tracking)
         track_buttons_layout.addWidget(self.start_tracking_btn)
-        self.stop_tracking_btn = QPushButton("â¹ï¸ Stop Recording")
+        self.stop_tracking_btn = QPushButton("Stop Recording")
         self.stop_tracking_btn.setObjectName("secondary")
         self.stop_tracking_btn.setEnabled(False)
         self.stop_tracking_btn.clicked.connect(self.stop_tracking)
@@ -795,7 +795,7 @@ class NavigationModule(BaseModule):
         record_group.setLayout(record_layout)
         layout.addWidget(record_group)
         # Saved tracks
-        tracks_group = QGroupBox("ðŸ“Š Saved Tracks")
+        tracks_group = QGroupBox("Saved Tracks")
         tracks_layout = QVBoxLayout()
         self.tracks_table = QTableWidget()
         track_headers = ["Name", "Distance", "Duration", "Points", "Created", "Actions"]
@@ -825,11 +825,11 @@ class NavigationModule(BaseModule):
         controls_layout.addWidget(QLabel("Mode:"))
         controls_layout.addWidget(self.map_mode_combo)
         controls_layout.addStretch()
-        self.center_on_position_btn = QPushButton("ðŸ“ Center on Position")
+        self.center_on_position_btn = QPushButton("Center on Position")
         self.center_on_position_btn.clicked.connect(self.center_map_on_position)
         controls_layout.addWidget(self.center_on_position_btn)
         layout.addLayout(controls_layout)
-        overlay_group = QGroupBox("ðŸ—ºï¸ Terrain Overlays")
+        overlay_group = QGroupBox("Terrain Overlays")
         overlay_layout = QGridLayout()
         overlay_layout.addWidget(QLabel("Overlay:"), 0, 0)
         self.overlay_combo = QComboBox()
@@ -865,7 +865,7 @@ class NavigationModule(BaseModule):
         self.map_status_label = QLabel("Map tiles will be cached for offline use once loaded.")
         self.map_status_label.setObjectName("statusLabel")
         layout.addWidget(self.map_status_label)
-        poi_group = QGroupBox("ðŸ“ Points of Interest")
+        poi_group = QGroupBox("Points of Interest")
         poi_layout = QVBoxLayout()
         poi_form_layout = QFormLayout()
         self.poi_name_edit = QLineEdit()
@@ -891,10 +891,10 @@ class NavigationModule(BaseModule):
         self.poi_notes_edit.setPlaceholderText("Optional notes or instructions")
         poi_form_layout.addRow("Notes:", self.poi_notes_edit)
         poi_buttons_layout = QHBoxLayout()
-        self.poi_use_current_btn = QPushButton("ðŸ“ Use Current Position")
+        self.poi_use_current_btn = QPushButton("Use Current Position")
         self.poi_use_current_btn.clicked.connect(self.use_current_position_for_poi)
         poi_buttons_layout.addWidget(self.poi_use_current_btn)
-        self.add_poi_btn = QPushButton("âœ… Add Point of Interest")
+        self.add_poi_btn = QPushButton("Add Point of Interest")
         self.add_poi_btn.setObjectName("primary")
         self.add_poi_btn.clicked.connect(self.add_point_of_interest)
         poi_buttons_layout.addWidget(self.add_poi_btn)
@@ -1007,10 +1007,10 @@ class NavigationModule(BaseModule):
         """Handle GPS position updates."""
         self.current_position = GPSCoordinate(latitude, longitude, altitude, accuracy)
         # Update UI
-        self.latitude_label.setText(f"{latitude:.6f}Â° ({self.current_position.latitude_dms})")
-        self.longitude_label.setText(f"{longitude:.6f}Â° ({self.current_position.longitude_dms})")
+        self.latitude_label.setText(f"{latitude:.6f} deg ({self.current_position.latitude_dms})")
+        self.longitude_label.setText(f"{longitude:.6f} deg ({self.current_position.longitude_dms})")
         self.altitude_label.setText(f"{altitude:.1f} m")
-        self.accuracy_label.setText(f"Â±{accuracy:.1f} m")
+        self.accuracy_label.setText(f"+/-{accuracy:.1f} m")
         # Update compass bearing (simulated)
         import random
         bearing = (bearing + random.randint(-5, 5)) % 360 if 'bearing' in locals() else random.randint(0, 360)
@@ -1032,7 +1032,7 @@ class NavigationModule(BaseModule):
             distance = self.current_position.distance_to(waypoint.coordinate)
             bearing = self.current_position.bearing_to(waypoint.coordinate)
             self.distance_label.setText(f"{distance:.0f} m")
-            self.bearing_label.setText(f"{bearing:.0f}Â°")
+            self.bearing_label.setText(f"{bearing:.0f} deg")
             # Update compass
             self.compass_widget.set_target(bearing, distance)
     def on_target_waypoint_changed(self):

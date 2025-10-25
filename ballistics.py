@@ -67,9 +67,9 @@ class EnvironmentalData:
     @property
     def air_density_ratio(self) -> float:
         """Calculate air density ratio compared to standard conditions."""
-        # Standard conditions: 15Â°C, 1013.25 hPa, 0% humidity
+        # Standard conditions: 15 degC, 1013.25 hPa, 0% humidity
         temp_kelvin = self.temperature + 273.15
-        standard_temp = 288.15  # 15Â°C in Kelvin
+        standard_temp = 288.15  # 15 degC in Kelvin
         # Simplified air density calculation
         pressure_ratio = self.pressure / 1013.25
         temp_ratio = standard_temp / temp_kelvin
@@ -349,7 +349,7 @@ class AdaptiveBallisticAdvisor(LoggableMixin):
         if temp_delta is not None and abs(temp_delta) >= self._TEMPERATURE_THRESHOLD:
             severity = self._max_severity(severity, "warning" if abs(temp_delta) >= 6 else "info")
             deltas.append(
-                f"temperature {adjusted_env.temperature:.1f}Â°C (profile {baseline_env.temperature:.1f}Â°C)"
+                f"temperature {adjusted_env.temperature:.1f} degC (profile {baseline_env.temperature:.1f} degC)"
             )
 
         pressure_delta = self._delta(self._telemetry.pressure, baseline_env.pressure)
@@ -427,7 +427,7 @@ class AdaptiveBallisticAdvisor(LoggableMixin):
         direction = "right" if windage_moa > 0 else "left"
         drift_cm = abs(point.windage * 100.0)
         if telemetry.wind_direction is not None:
-            wind_descriptor = f"{telemetry.wind_speed:.1f} m/s @ {telemetry.wind_direction:.0f}Â°"
+            wind_descriptor = f"{telemetry.wind_speed:.1f} m/s @ {telemetry.wind_direction:.0f} deg"
         else:
             wind_descriptor = f"{telemetry.wind_speed:.1f} m/s"
         justification = (
@@ -469,7 +469,7 @@ class AdaptiveBallisticAdvisor(LoggableMixin):
         if drift is None or abs(drift) < self._INCLINATION_WARNING:
             return []
         recommendation = "Level the rifle or recalibrate inclinometer before the next shot."
-        justification = f"Inclination drift of {drift:+.2f}Â° exceeds the {self._INCLINATION_WARNING:.1f}Â° tolerance."
+        justification = f"Inclination drift of {drift:+.2f} deg exceeds the {self._INCLINATION_WARNING:.1f} deg tolerance."
         return [
             BallisticSuggestion(
                 focus="Cant Error",
@@ -677,13 +677,13 @@ class BallisticsCalculator(LoggableMixin):
         """Calculate complete trajectory with environmental corrections."""
         self.log_debug(f"Calculating trajectory for {ammo.name}")
         # Constants
-        GRAVITY = 9.80665  # m/sÂ²
+        GRAVITY = 9.80665  # m/s^2
         # Convert units and setup initial conditions
         mass_kg = ammo.bullet_weight * 0.00006479891  # grains to kg
         diameter_m = ammo.bullet_diameter / 1000.0  # mm to m
         cross_section = math.pi * (diameter_m / 2) ** 2
         # Environmental corrections
-        air_density = environment.air_density_ratio * 1.225  # kg/mÂ³ at sea level
+        air_density = environment.air_density_ratio * 1.225  # kg/m^3 at sea level
         sound_speed = 331.3 * math.sqrt(1 + environment.temperature / 273.15)
         # Zero the rifle (find launch angle for zero at specified distance)
         zero_angle = self._find_zero_angle(ammo, environment, zero_distance)
@@ -709,7 +709,7 @@ class BallisticsCalculator(LoggableMixin):
             "ammunition": ammo.name,
             "zero_distance": zero_distance,
             "max_range": max_range,
-            "environment": f"{environment.temperature}Â°C, {environment.pressure}hPa"
+            "environment": f"{environment.temperature} degC, {environment.pressure}hPa"
         }, {
             "muzzle_energy": result.muzzle_energy,
             "mpbr": mpbr,
@@ -1072,7 +1072,7 @@ if _QT_AVAILABLE:
             scroll_widget = QWidget()
             scroll_layout = QVBoxLayout(scroll_widget)
             # Ammunition selection group
-            ammo_group = QGroupBox("ðŸŽ¯ Ammunition Selection")
+            ammo_group = QGroupBox("Ammunition Selection")
             ammo_layout = QFormLayout()
             self.caliber_combo = QComboBox()
             self.caliber_combo.addItems(["Custom"] + self.ammo_db.get_all_calibers())
@@ -1084,7 +1084,7 @@ if _QT_AVAILABLE:
             ammo_group.setLayout(ammo_layout)
             scroll_layout.addWidget(ammo_group)
             # Custom ammunition group
-            self.custom_ammo_group = QGroupBox("âš™ï¸ Custom Ammunition")
+            self.custom_ammo_group = QGroupBox("Custom Ammunition")
             custom_layout = QFormLayout()
             self.bullet_weight_spin = QDoubleSpinBox()
             self.bullet_weight_spin.setRange(20, 1000)
@@ -1108,12 +1108,12 @@ if _QT_AVAILABLE:
             self.custom_ammo_group.setLayout(custom_layout)
             scroll_layout.addWidget(self.custom_ammo_group)
             # Environmental conditions group
-            env_group = QGroupBox("ðŸŒ¤ï¸ Environmental Conditions")
+            env_group = QGroupBox("Environmental Conditions")
             env_layout = QFormLayout()
             self.temperature_spin = QSpinBox()
             self.temperature_spin.setRange(-40, 60)
             self.temperature_spin.setValue(15)
-            self.temperature_spin.setSuffix("Â°C")
+            self.temperature_spin.setSuffix(" degC")
             env_layout.addRow("Temperature:", self.temperature_spin)
             self.pressure_spin = QDoubleSpinBox()
             self.pressure_spin.setRange(800, 1100)
@@ -1140,14 +1140,14 @@ if _QT_AVAILABLE:
             self.wind_direction_spin = QSpinBox()
             self.wind_direction_spin.setRange(0, 360)
             self.wind_direction_spin.setValue(90)
-            self.wind_direction_spin.setSuffix("Â°")
+            self.wind_direction_spin.setSuffix(" deg")
             wind_layout.addWidget(QLabel("@"))
             wind_layout.addWidget(self.wind_direction_spin)
             env_layout.addRow("Wind Speed:", wind_layout)
             env_group.setLayout(env_layout)
             scroll_layout.addWidget(env_group)
             # Calculation parameters group
-            calc_group = QGroupBox("ðŸ“ Calculation Parameters")
+            calc_group = QGroupBox("Calculation Parameters")
             calc_layout = QFormLayout()
             self.zero_distance_spin = QSpinBox()
             self.zero_distance_spin.setRange(25, 500)
@@ -1168,7 +1168,7 @@ if _QT_AVAILABLE:
             calc_group.setLayout(calc_layout)
             scroll_layout.addWidget(calc_group)
             # Calculate button
-            self.calculate_btn = QPushButton("ðŸ§® Calculate Trajectory")
+            self.calculate_btn = QPushButton("Calculate Trajectory")
             self.calculate_btn.setObjectName("primary")
             self.calculate_btn.setMinimumHeight(50)
             self.calculate_btn.clicked.connect(self.calculate_ballistics)
@@ -1187,7 +1187,7 @@ if _QT_AVAILABLE:
             # Trajectory chart tab
             if _QT_CHARTS_AVAILABLE and QChartView is not None:
                 self.chart_view = QChartView()
-                self.results_tabs.addTab(self.chart_view, "ðŸ“ˆ Trajectory Chart")
+                self.results_tabs.addTab(self.chart_view, "Trajectory Chart")
             else:
                 self.chart_view = None
                 placeholder = QLabel(
@@ -1195,7 +1195,7 @@ if _QT_AVAILABLE:
                 )
                 placeholder.setWordWrap(True)
                 placeholder.setAlignment(Qt.AlignCenter)
-                self.results_tabs.addTab(placeholder, "ðŸ“ˆ Trajectory Chart")
+                self.results_tabs.addTab(placeholder, "Trajectory Chart")
             # Data table tab
             self.create_data_table_tab()
             # Come-ups tab
@@ -1203,14 +1203,14 @@ if _QT_AVAILABLE:
             # Summary tab
             self.create_summary_tab()
             # Export controls
-            export_group = QGroupBox("ðŸ“¼ Export Trajectory")
+            export_group = QGroupBox("Export Trajectory")
             export_layout = QHBoxLayout(export_group)
             export_layout.addWidget(QLabel("Format:"))
             self.export_format_combo = QComboBox()
             self.export_format_combo.addItems(["CSV", "JSON", "KML"])
             export_layout.addWidget(self.export_format_combo)
             export_layout.addStretch()
-            self.export_results_btn = QPushButton("ðŸ’¾ Export Results")
+            self.export_results_btn = QPushButton("Export Results")
             self.export_results_btn.clicked.connect(self.prompt_export_results)
             self.export_results_btn.setEnabled(False)
             export_layout.addWidget(self.export_results_btn)
@@ -1228,7 +1228,7 @@ if _QT_AVAILABLE:
             header = self.data_table.horizontalHeader()
             header.setSectionResizeMode(QHeaderView.ResizeToContents)
             layout.addWidget(self.data_table)
-            self.results_tabs.addTab(tab, "ðŸ“Š Data Table")
+            self.results_tabs.addTab(tab, "Data Table")
         def create_comeups_tab(self):
             """Create scope adjustments (come-ups) tab."""
             tab = QWidget()
@@ -1252,7 +1252,7 @@ if _QT_AVAILABLE:
             header = self.comeups_table.horizontalHeader()
             header.setSectionResizeMode(QHeaderView.ResizeToContents)
             layout.addWidget(self.comeups_table)
-            self.results_tabs.addTab(tab, "ðŸŽ¯ Come-Ups")
+            self.results_tabs.addTab(tab, "Come-Ups")
         def create_summary_tab(self):
             """Create ballistics summary tab."""
             tab = QWidget()
@@ -1261,7 +1261,7 @@ if _QT_AVAILABLE:
             self.summary_text.setReadOnly(True)
             self.summary_text.setFont(QFont("monospace", 10))
             layout.addWidget(self.summary_text)
-            self.results_tabs.addTab(tab, "ðŸ“‹ Summary")
+            self.results_tabs.addTab(tab, "Summary")
     
         def prompt_export_results(self):
             """Prompt the user to export current trajectory results."""
@@ -1565,11 +1565,11 @@ if _QT_AVAILABLE:
     Ballistic Coefficient: {ammo.ballistic_coefficient} ({ammo.drag_model.value})
     Muzzle Energy: {result.muzzle_energy:.0f} J
     Environmental Conditions:
-    Temperature: {env.temperature}Â°C
+    Temperature: {env.temperature} degC
     Pressure: {env.pressure} hPa
     Humidity: {env.humidity}%
     Altitude: {env.altitude} m
-    Wind: {env.wind_speed} m/s @ {env.wind_direction}Â°
+    Wind: {env.wind_speed} m/s @ {env.wind_direction} deg
     Zero Distance: {result.zero_distance} m
     Maximum Point Blank Range: {result.max_point_blank_range:.0f} m
     Vital Zone Diameter: {result.vital_zone_diameter} m
@@ -1659,7 +1659,7 @@ else:  # pragma: no cover - UI unavailable without Qt bindings
                 writer.writerow(["Hunt Pro Ballistics Calculation"])
                 writer.writerow([f"Ammunition: {self.current_result.ammunition.name}"])
                 writer.writerow([f"Zero Distance: {self.current_result.zero_distance} m"])
-                writer.writerow([f"Environment: {self.current_result.environment.temperature}Â°C, {self.current_result.environment.pressure} hPa"])
+                writer.writerow([f"Environment: {self.current_result.environment.temperature} degC, {self.current_result.environment.pressure} hPa"])
                 writer.writerow([])
                 # Column headers
                 writer.writerow(["Distance (m)", "Drop (cm)", "Velocity (m/s)", "Energy (J)", "Time (s)", "Wind Drift (cm)"])
@@ -1722,7 +1722,7 @@ else:  # pragma: no cover - UI unavailable without Qt bindings
             summary_lines = [
                 f"Ammunition: {ammo_name}",
                 f"Zero Distance: {self.current_result.zero_distance} m",
-                f"Environment: {self.current_result.environment.temperature}°C, {self.current_result.environment.pressure} hPa",
+                f"Environment: {self.current_result.environment.temperature} degC, {self.current_result.environment.pressure} hPa",
             ]
             ET.SubElement(summary, 'description').text = '\n'.join(summary_lines)
     
@@ -1916,7 +1916,7 @@ else:  # pragma: no cover - UI unavailable without Qt bindings
         """Calculate kinetic energy in joules."""
         return 0.5 * mass_kg * velocity_mps ** 2
     def calculate_momentum(mass_kg: float, velocity_mps: float) -> float:
-        """Calculate momentum in kgâ‹…m/s."""
+        """Calculate momentum in kg*m/s."""
         return mass_kg * velocity_mps
     def calculate_taylor_ko_factor(bullet_weight_grains: float, velocity_fps: float, diameter_inches: float) -> float:
         """Calculate Taylor Knock-Out factor."""
@@ -1927,23 +1927,23 @@ else:  # pragma: no cover - UI unavailable without Qt bindings
         # Simplified recoil calculation
         bullet_momentum = bullet_weight_grains * muzzle_velocity_fps
         powder_momentum = powder_weight_grains * 4000  # Approximate gas velocity
-        total_momentum = (bullet_momentum + powder_momentum) / 7000  # Convert to lbâ‹…ft/s
+        total_momentum = (bullet_momentum + powder_momentum) / 7000  # Convert to lb*ft/s
         rifle_weight_slugs = rifle_weight_lbs / 32.174
         recoil_velocity = total_momentum / rifle_weight_slugs
         return 0.5 * rifle_weight_slugs * recoil_velocity ** 2
     def atmospheric_correction_factor(temperature_f: float, pressure_inhg: float, 
                                     humidity_percent: float) -> float:
         """Calculate atmospheric correction factor for ballistic coefficient."""
-        # Standard conditions: 59Â°F, 29.92 inHg, 78% humidity
+        # Standard conditions: 59 degF, 29.92 inHg, 78% humidity
         temp_factor = (459.4 + temperature_f) / 518.4  # Rankine scale
         pressure_factor = pressure_inhg / 29.92
         humidity_factor = (100 - humidity_percent) / 22  # Simplified
         return (pressure_factor / temp_factor) * humidity_factor
     # Ballistics formulas and constants
-    GRAVITY_METRIC = 9.80665  # m/sÂ²
-    GRAVITY_IMPERIAL = 32.174  # ft/sÂ²
-    STANDARD_TEMPERATURE_C = 15.0  # Â°C
-    STANDARD_TEMPERATURE_F = 59.0  # Â°F
+    GRAVITY_METRIC = 9.80665  # m/s^2
+    GRAVITY_IMPERIAL = 32.174  # ft/s^2
+    STANDARD_TEMPERATURE_C = 15.0  #  degC
+    STANDARD_TEMPERATURE_F = 59.0  #  degF
     STANDARD_PRESSURE_HPA = 1013.25  # hPa
     STANDARD_PRESSURE_INHG = 29.92  # inHg
     SPEED_OF_SOUND_STP = 331.3  # m/s at standard temperature and pressure
