@@ -26,29 +26,29 @@ class KeyboardLayout:
     LANGUAGE_KEY = "Lang"
 
     QWERTY_LETTERS = [
-        ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
-        ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
-        [SHIFT_KEY, 'z', 'x', 'c', 'v', 'b', 'n', 'm', BACKSPACE_KEY]
+        ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+        ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
+        [SHIFT_KEY, "z", "x", "c", "v", "b", "n", "m", BACKSPACE_KEY]
     ]
     QWERTY_LETTERS_UPPER = [
-        ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
-        ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
-        [SHIFT_KEY, 'Z', 'X', 'C', 'V', 'B', 'N', 'M', BACKSPACE_KEY]
+        ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+        ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
+        [SHIFT_KEY, "Z", "X", "C", "V", "B", "N", "M", BACKSPACE_KEY]
     ]
     NUMBERS_SYMBOLS = [
-        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
-        ['-', '/', ':', ';', '(', ')', '$', '&', '@', '"'],
-        ['#+=', '.', ',', '?', '!', "'", BACKSPACE_KEY]
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+        ["-", "/", ":", ";", "(", ")", "$", "&", "@", '"'],
+        ["#+=", ".", ",", "?", "!", "'", BACKSPACE_KEY]
     ]
     SYMBOLS_EXTRA = [
-        ['[', ']', '{', '}', '#', '%', '^', '*', '+', '='],
-        ['_', '\', '|', '~', '<', '>', 'EUR', 'GBP', 'JPY', '*'],
-        ['123', '.', ',', '?', '!', "'", BACKSPACE_KEY]
+        ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="],
+        ["_", "\\", "|", "~", "<", ">", "EUR", "GBP", "JPY", "*"],
+        ["123", ".", ",", "?", "!", "'", BACKSPACE_KEY]
     ]
     # Bottom row for all layouts
-    BOTTOM_ROW_LETTERS = ['123', LANGUAGE_KEY, ' ', '.', ENTER_KEY]
-    BOTTOM_ROW_NUMBERS = ['ABC', LANGUAGE_KEY, ' ', '.', ENTER_KEY]
-    BOTTOM_ROW_SYMBOLS = ['123', LANGUAGE_KEY, ' ', '.', ENTER_KEY]
+    BOTTOM_ROW_LETTERS = ["123", LANGUAGE_KEY, " ", ".", ENTER_KEY]
+    BOTTOM_ROW_NUMBERS = ["ABC", LANGUAGE_KEY, " ", ".", ENTER_KEY]
+    BOTTOM_ROW_SYMBOLS = ["123", LANGUAGE_KEY, " ", ".", ENTER_KEY]
 
 class VirtualKeyboard(QWidget, LoggableMixin):
     """Touch-optimized virtual keyboard widget."""
