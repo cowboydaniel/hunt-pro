@@ -185,9 +185,9 @@ class SensorDiagnosticsEngine:
     ) -> List[str]:
         alerts: List[str] = []
         if signal_quality < 30:
-            alerts.append("Bluetooth signal is weak – reposition device for better line of sight.")
+            alerts.append("Bluetooth signal is weak - reposition device for better line of sight.")
         if battery_level < 20:
-            alerts.append("Battery level low – charge or replace before departing.")
+            alerts.append("Battery level low - charge or replace before departing.")
         if calibration_recommended:
             alerts.append("Calibration recommended to maintain accuracy.")
         return alerts

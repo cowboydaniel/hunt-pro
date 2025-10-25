@@ -483,8 +483,8 @@ class AdaptiveBallisticAdvisor(LoggableMixin):
     def _parse_metric_value(raw_value: str) -> Optional[float]:
         if not raw_value:
             return None
-        cleaned = raw_value.replace("Â", "").replace(",", ".")
-        cleaned = cleaned.replace("±", "")
+        cleaned = raw_value.replace("\u00c2", "").replace(",", ".")
+        cleaned = cleaned.replace("\u00b1", "")
         match = re.search(r"([+-]?\d+(?:\.\d+)?)", cleaned)
         if not match:
             return None

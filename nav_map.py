@@ -363,7 +363,7 @@ class RandomWalkGPSProvider(BaseGPSProvider):
         import random
         lat_delta = (random.random() - 0.5) * 0.0001  # ~10m variation
         lon_delta = (random.random() - 0.5) * 0.0001
-        alt_delta = (random.random() - 0.5) * 2.0  # ±1m altitude variation
+        alt_delta = (random.random() - 0.5) * 2.0  # +/-1m altitude variation
         self.current_position.latitude += lat_delta
         self.current_position.longitude += lon_delta
         self.current_position.altitude += alt_delta
