@@ -1,12 +1,12 @@
 # Hunt Pro
 Hunt Pro is a PySide6 desktop assistant designed to support hunters with modern field tools such as navigation, ballistics, and logging utilities. The application organizes each capability into modular dashboards that share a consistent interface built on the `BaseModule` widget defined in `main.py`.
 ## Features
-- **Modular architecture** – Each feature is implemented as a QWidget-based module that inherits shared behavior such as settings management, virtual input installation, and status reporting.
-- **Ballistics calculator** – Advanced drag modelling, ammunition databases, and environmental corrections for precision shooting, implemented in `ballistics.py`.
-- **Navigation mapping** – GPS-aware map visualization, tracking, and waypoint planning (see `nav_map.py`).
-- **Game logging** – Structured harvest logging, tagging, and analytics tools (see `game_log.py`).
-- **Virtual inputs** – On-screen keyboard and numpad managers for touch-friendly deployments (`keyboard.py` and `numpad.py`).
-- **Robust logging** – Centralized logging utilities exposed via `logger.py`.
+- **Modular architecture** - Each feature is implemented as a QWidget-based module that inherits shared behavior such as settings management, virtual input installation, and status reporting.
+- **Ballistics calculator** - Advanced drag modelling, ammunition databases, and environmental corrections for precision shooting, implemented in `ballistics.py`.
+- **Navigation mapping** - GPS-aware map visualization, tracking, and waypoint planning (see `nav_map.py`).
+- **Game logging** - Structured harvest logging, tagging, and analytics tools (see `game_log.py`).
+- **Virtual inputs** - On-screen keyboard and numpad managers for touch-friendly deployments (`keyboard.py` and `numpad.py`).
+- **Robust logging** - Centralized logging utilities exposed via `logger.py`.
 ## Environment Setup
 ### Supported Platforms
 - **Operating systems:** Windows 10/11, macOS 12+, and modern Linux distributions with X11 or Wayland support.

@@ -113,7 +113,7 @@ class SensorDiagnosticsEngine:
             metrics.append(
                 SensorMetric(
                     label="Inclination drift",
-                    value=f"{drift:+.2f}Â°",
+                    value=f"{drift:+.2f} deg",
                     status="ok" if abs(drift) < 0.5 else "warn",
                     hint="Deviation from leveled reference",
                 )
@@ -123,7 +123,7 @@ class SensorDiagnosticsEngine:
             metrics.append(
                 SensorMetric(
                     label="Ambient temperature",
-                    value=f"{temp:.1f} Â°C",
+                    value=f"{temp:.1f} degC",
                     hint="Live reading from weather meter",
                 )
             )
@@ -147,7 +147,7 @@ class SensorDiagnosticsEngine:
             metrics.append(
                 SensorMetric(
                     label="Wind direction",
-                    value=f"{(tick * 15) % 360:.0f}Â°",
+                    value=f"{(tick * 15) % 360:.0f} deg",
                 )
             )
         if DeviceCapability.BAROMETRIC_PRESSURE in device.capabilities:
@@ -171,7 +171,7 @@ class SensorDiagnosticsEngine:
             metrics.append(
                 SensorMetric(
                     label="Split variance",
-                    value=f"Â±{variance*1000:.0f} ms",
+                    value=f"+/-{variance*1000:.0f} ms",
                 )
             )
 
@@ -185,9 +185,9 @@ class SensorDiagnosticsEngine:
     ) -> List[str]:
         alerts: List[str] = []
         if signal_quality < 30:
-            alerts.append("Bluetooth signal is weak – reposition device for better line of sight.")
+            alerts.append("Bluetooth signal is weak - reposition device for better line of sight.")
         if battery_level < 20:
-            alerts.append("Battery level low – charge or replace before departing.")
+            alerts.append("Battery level low - charge or replace before departing.")
         if calibration_recommended:
             alerts.append("Calibration recommended to maintain accuracy.")
         return alerts

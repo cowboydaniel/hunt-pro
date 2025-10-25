@@ -20,31 +20,31 @@ from logger import get_logger, LoggableMixin
 class NumpadLayout:
     """Numpad layout definitions for different input types."""
     STANDARD_KEYS = [
-        ['C', 'Â±', '%', 'âŒ«'],
-        ['7', '8', '9', 'Ã·'],
-        ['4', '5', '6', 'Ã—'],
+        ['C', '+/-', '%', 'Backspace'],
+        ['7', '8', '9', '/'],
+        ['4', '5', '6', '*'],
         ['1', '2', '3', '-'],
         ['0', '.', '=', '+']
     ]
     SIMPLE_KEYS = [
-        ['âŒ«', 'Â±', 'C'],
+        ['Backspace', '+/-', 'C'],
         ['7', '8', '9'],
         ['4', '5', '6'],
         ['1', '2', '3'],
-        ['0', '.', 'â†µ']
+        ['0', '.', 'Enter']
     ]
     # Key mappings for special functions
     SPECIAL_KEYS = {
         'C': 'clear',
-        'Â±': 'plus_minus',
+        '+/-': 'plus_minus',
         '%': 'percent',
-        'âŒ«': 'backspace',
-        'Ã·': 'divide',
-        'Ã—': 'multiply',
+        'Backspace': 'backspace',
+        '/': 'divide',
+        '*': 'multiply',
         '-': 'subtract',
         '+': 'add',
         '=': 'equals',
-        'â†µ': 'enter'
+        'Enter': 'enter'
     }
 class VirtualNumpad(QWidget, LoggableMixin):
     """Touch-optimized virtual numpad widget."""
@@ -169,13 +169,13 @@ class VirtualNumpad(QWidget, LoggableMixin):
         button.setMinimumSize(self.button_size)
         # Set object names for styling
         if key_text in NumpadLayout.SPECIAL_KEYS:
-            if key_text in ['C', 'âŒ«']:
+            if key_text in ['C', 'Backspace']:
                 button.setObjectName("clearKey")
-            elif key_text in ['+', '-', 'Ã—', 'Ã·', '=']:
+            elif key_text in ['+', '-', '*', '/', '=']:
                 button.setObjectName("operatorKey")
-            elif key_text in ['Â±', '%']:
+            elif key_text in ['+/-', '%']:
                 button.setObjectName("functionKey")
-            elif key_text == 'â†µ':
+            elif key_text == 'Enter':
                 button.setObjectName("enterKey")
         elif key_text == '0':
             button.setObjectName("zeroKey")
@@ -191,15 +191,15 @@ class VirtualNumpad(QWidget, LoggableMixin):
             button.clicked.connect(lambda checked, k=key_text: self.number_pressed.emit(k))
         elif key_text == '.':
             button.clicked.connect(self.decimal_pressed.emit)
-        elif key_text == 'âŒ«':
+        elif key_text == 'Backspace':
             button.clicked.connect(self.backspace_pressed.emit)
         elif key_text == 'C':
             button.clicked.connect(self.clear_pressed.emit)
-        elif key_text == 'â†µ':
+        elif key_text == 'Enter':
             button.clicked.connect(self.enter_pressed.emit)
-        elif key_text == 'Â±':
+        elif key_text == '+/-':
             button.clicked.connect(self.plus_minus_pressed.emit)
-        elif key_text in ['+', '-', 'Ã—', 'Ã·', '=', '%']:
+        elif key_text in ['+', '-', '*', '/', '=', '%']:
             button.clicked.connect(lambda checked, op=key_text: self.operation_pressed.emit(op))
         return button
     def setup_animations(self):
@@ -458,9 +458,9 @@ class VirtualNumpad(QWidget, LoggableMixin):
                 return left + right
             elif operation == '-':
                 return left - right
-            elif operation == 'Ã—':
+            elif operation == '*':
                 return left * right
-            elif operation == 'Ã·':
+            elif operation == '/':
                 return left / right if right != 0 else 0
             else:
                 return right

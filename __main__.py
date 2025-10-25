@@ -64,32 +64,32 @@ Examples:
     return parser.parse_args(argv)
 def diagnose_pyside6() -> bool:
     """Diagnose PySide6 installation issues."""
-    print("\nðŸ” Diagnosing PySide6 installation...")
+    print("\nDiagnosing PySide6 installation...")
     try:
         import PySide6
-        print(f"   âœ… PySide6 package found at: {PySide6.__file__}")
+        print(f"   OK PySide6 package found at: {PySide6.__file__}")
         try:
             from PySide6 import QtCore
-            print(f"   âœ… QtCore version: {QtCore.__version__}")
+            print(f"   OK QtCore version: {QtCore.__version__}")
         except ImportError as e:
-            print(f"   âŒ QtCore import failed: {e}")
+            print(f"   ERROR QtCore import failed: {e}")
             return False
         try:
             from PySide6 import QtWidgets
-            print("   âœ… QtWidgets imported successfully")
+            print("   OK QtWidgets imported successfully")
         except ImportError as e:
-            print(f"   âŒ QtWidgets import failed: {e}")
+            print(f"   ERROR QtWidgets import failed: {e}")
             return False
         try:
             from PySide6 import QtGui
-            print("   âœ… QtGui imported successfully")
+            print("   OK QtGui imported successfully")
         except ImportError as e:
-            print(f"   âŒ QtGui import failed: {e}")
+            print(f"   ERROR QtGui import failed: {e}")
             return False
         return True
     except ImportError:
-        print("   âŒ PySide6 package not found")
-        print(f"\nðŸ’¡ Installation suggestions:")
+        print("   ERROR PySide6 package not found")
+        print(f"\nInstallation suggestions:")
         print(f"   1. Verify installation: {sys.executable} -m pip show PySide6")
         print(f"   2. Reinstall: {sys.executable} -m pip uninstall PySide6 && {sys.executable} -m pip install PySide6")
         print(f"   3. Check permissions: make sure you can write to site-packages")
@@ -111,32 +111,32 @@ def check_dependencies() -> bool:
     }
     missing_required = []
     missing_optional = []
-    print(f"ðŸ Python version: {sys.version}")
-    print(f"ðŸ“ Python executable: {sys.executable}")
-    print(f"ðŸ“š Python path: {':'.join(sys.path[:3])}...\n")
+    print(f"Python version: {sys.version}")
+    print(f"Python executable: {sys.executable}")
+    print(f"Python path: {':'.join(sys.path[:3])}...\n")
     for display_name, (import_name, description) in required_packages.items():
         try:
             module = __import__(import_name)
             # For PySide6, also check if we can import core components
             if import_name == 'PySide6':
                 from PySide6 import QtCore, QtWidgets, QtGui
-                print(f"âœ… {display_name}: {description} (version: {getattr(module, '__version__', 'unknown')})")
+                print(f"OK {display_name}: {description} (version: {getattr(module, '__version__', 'unknown')})")
             else:
-                print(f"âœ… {display_name}: {description}")
+                print(f"OK {display_name}: {description}")
         except ImportError as e:
             missing_required.append(f"{display_name} ({description})")
-            print(f"âŒ {display_name}: {description} - MISSING")
+            print(f"ERROR {display_name}: {description} - MISSING")
             if display_name == 'PySide6':
                 print(f"   Import error: {e}")
     for display_name, (import_name, description) in optional_packages.items():
         try:
             __import__(import_name)
-            print(f"âœ… {display_name}: {description}")
+            print(f"OK {display_name}: {description}")
         except ImportError:
             missing_optional.append(f"{display_name} ({description})")
-            print(f"âš ï¸ {display_name}: {description} - OPTIONAL")
+            print(f"WARNING {display_name}: {description} - OPTIONAL")
     if missing_required:
-        print(f"\nâŒ Missing required dependencies:")
+        print(f"\nMissing required dependencies:")
         for package in missing_required:
             print(f"   - {package}")
         # Special PySide6 diagnostic
@@ -151,13 +151,13 @@ def check_dependencies() -> bool:
                 install_commands.append('PySide6')
             else:
                 install_commands.append(pkg_name.lower())
-        print(f"\nðŸ’¡ Try installing with:")
+        print(f"\nTry installing with:")
         print(f"   pip install --user " + " ".join(install_commands))
         print(f"   or")
         print(f"   python3 -m pip install --user " + " ".join(install_commands))
         return False
     if missing_optional:
-        print(f"\nâš ï¸ Missing optional dependencies (some features may be unavailable):")
+        print(f"\nMissing optional dependencies (some features may be unavailable):")
         for package in missing_optional:
             print(f"   - {package}")
     return True
@@ -185,7 +185,7 @@ def run_with_profiling():
         from pathlib import Path
         # Create profiler
         profiler = cProfile.Profile()
-        print("ðŸ”¬ Starting Hunt Pro with performance profiling...")
+        print("Starting Hunt Pro with performance profiling...")
         profiler.enable()
         # Run the main application
         from main import main
@@ -199,13 +199,13 @@ def run_with_profiling():
         # Print summary
         stats = pstats.Stats(profiler)
         stats.sort_stats('cumulative')
-        print(f"\nðŸ“Š Performance Profile Summary:")
+        print(f"\nPerformance Profile Summary:")
         print(f"Profile saved to: {profile_file}")
         print("\nTop 10 functions by cumulative time:")
         stats.print_stats(10)
         return exit_code
     except ImportError:
-        print("âŒ cProfile not available, running without profiling")
+        print("cProfile not available, running without profiling")
         from main import main
         return main()
 def main():
@@ -215,32 +215,32 @@ def main():
         args = parse_arguments()
         # Print banner
         print("\n" + "="*60)
-        print("ðŸ¹ Hunt Pro - Professional Hunting Assistant")
+        print("Hunt Pro - Professional Hunting Assistant")
         print("   Version 2.0.0 - Touch-Optimized Field Edition")
         print("="*60 + "\n")
         # Setup environment
         setup_environment()
         # Check dependencies
-        print("ðŸ” Checking dependencies...")
+        print("Checking dependencies...")
         deps_ok = check_dependencies()
         if args.check_deps:
             # Just check dependencies and exit
             if deps_ok:
-                print("\nâœ… All dependencies are satisfied!")
+                print("\nAll dependencies are satisfied!")
                 return 0
             else:
-                print("\nâŒ Some dependencies are missing!")
+                print("\nSome dependencies are missing!")
                 return 1
         if not args.force and not deps_ok:
-            print("\nâŒ Cannot start application due to missing dependencies.")
+            print("\nCannot start application due to missing dependencies.")
             print("Use --force to attempt startup anyway, or install missing packages.")
             return 1
         if not deps_ok:
-            print("\nâš ï¸ Starting with missing dependencies (--force specified)")
+            print("\nStarting with missing dependencies (--force specified)")
             print("Some features may not work correctly.\n")
         # Set up logging level
         if args.debug:
-            print("ðŸ› Debug logging enabled\n")
+            print("Debug logging enabled\n")
         # Start application
         if args.profile:
             return run_with_profiling()
@@ -248,29 +248,29 @@ def main():
             from main import main as run_main
             return run_main()
     except KeyboardInterrupt:
-        print("\n\nðŸ›‘ Application interrupted by user")
+        print("\n\nApplication interrupted by user")
         return 130
     except Exception as e:
-        print(f"\nðŸ’¥ Critical error starting Hunt Pro:")
+        print(f"\nCritical error starting Hunt Pro:")
         print(f"   {type(e).__name__}: {e}")
         if args.debug if 'args' in locals() else False:
-            print(f"\nðŸ” Debug traceback:")
+            print(f"\nDebug traceback:")
             traceback.print_exc()
         else:
-            print(f"\nðŸ’¡ Run with --debug for detailed error information")
+            print(f"\nRun with --debug for detailed error information")
         return 1
 if __name__ == "__main__":
     start_time = time.time()
     try:
         exit_code = main()
         runtime = time.time() - start_time
-        print(f"\nâ±ï¸ Hunt Pro ran for {runtime:.2f} seconds")
+        print(f"\nHunt Pro ran for {runtime:.2f} seconds")
         sys.exit(exit_code)
     except SystemExit:
         runtime = time.time() - start_time
-        print(f"\nâ±ï¸ Hunt Pro ran for {runtime:.2f} seconds")
+        print(f"\nHunt Pro ran for {runtime:.2f} seconds")
         raise
     except Exception as e:
         runtime = time.time() - start_time
-        print(f"\nðŸ’¥ Unexpected error after {runtime:.2f} seconds: {e}")
+        print(f"\nUnexpected error after {runtime:.2f} seconds: {e}")
         sys.exit(1)

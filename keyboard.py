@@ -19,30 +19,37 @@ import string
 from logger import get_logger, LoggableMixin
 class KeyboardLayout:
     """Keyboard layout definitions for different input types."""
+
+    SHIFT_KEY = "Shift"
+    BACKSPACE_KEY = "Backspace"
+    ENTER_KEY = "Enter"
+    LANGUAGE_KEY = "Lang"
+
     QWERTY_LETTERS = [
         ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
         ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
-        ['â‡§', 'z', 'x', 'c', 'v', 'b', 'n', 'm', 'âŒ«']
+        [SHIFT_KEY, 'z', 'x', 'c', 'v', 'b', 'n', 'm', BACKSPACE_KEY]
     ]
     QWERTY_LETTERS_UPPER = [
         ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
         ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
-        ['â‡§', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', 'âŒ«']
+        [SHIFT_KEY, 'Z', 'X', 'C', 'V', 'B', 'N', 'M', BACKSPACE_KEY]
     ]
     NUMBERS_SYMBOLS = [
         ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
         ['-', '/', ':', ';', '(', ')', '$', '&', '@', '"'],
-        ['#+=', '.', ',', '?', '!', "'", 'âŒ«']
+        ['#+=', '.', ',', '?', '!', "'", BACKSPACE_KEY]
     ]
     SYMBOLS_EXTRA = [
         ['[', ']', '{', '}', '#', '%', '^', '*', '+', '='],
-        ['_', '\\', '|', '~', '<', '>', 'â‚¬', 'Â£', 'Â¥', 'â€¢'],
-        ['123', '.', ',', '?', '!', "'", 'âŒ«']
+        ['_', '\', '|', '~', '<', '>', 'EUR', 'GBP', 'JPY', '*'],
+        ['123', '.', ',', '?', '!', "'", BACKSPACE_KEY]
     ]
     # Bottom row for all layouts
-    BOTTOM_ROW_LETTERS = ['123', 'ðŸŒ', ' ', '.', 'â†µ']
-    BOTTOM_ROW_NUMBERS = ['ABC', 'ðŸŒ', ' ', '.', 'â†µ']
-    BOTTOM_ROW_SYMBOLS = ['123', 'ðŸŒ', ' ', '.', 'â†µ']
+    BOTTOM_ROW_LETTERS = ['123', LANGUAGE_KEY, ' ', '.', ENTER_KEY]
+    BOTTOM_ROW_NUMBERS = ['ABC', LANGUAGE_KEY, ' ', '.', ENTER_KEY]
+    BOTTOM_ROW_SYMBOLS = ['123', LANGUAGE_KEY, ' ', '.', ENTER_KEY]
+
 class VirtualKeyboard(QWidget, LoggableMixin):
     """Touch-optimized virtual keyboard widget."""
     # Signals
@@ -181,20 +188,28 @@ class VirtualKeyboard(QWidget, LoggableMixin):
         button.setFont(QFont("Arial", 14, QFont.Medium))
         button.setMinimumSize(self.key_size)
         # Set object names for styling
-        if key_text in ['â‡§', 'âŒ«', 'â†µ', '123', 'ABC', '#+=', 'ðŸŒ']:
+        if key_text in [
+            KeyboardLayout.SHIFT_KEY,
+            KeyboardLayout.BACKSPACE_KEY,
+            KeyboardLayout.ENTER_KEY,
+            '123',
+            'ABC',
+            '#+=',
+            KeyboardLayout.LANGUAGE_KEY
+        ]:
             button.setObjectName("specialKey")
         elif key_text == ' ':
             button.setObjectName("spaceKey")
-        elif key_text == 'â†µ':
+        elif key_text == KeyboardLayout.ENTER_KEY:
             button.setObjectName("enterKey")
-        elif key_text == 'âŒ«':
+        elif key_text == KeyboardLayout.BACKSPACE_KEY:
             button.setObjectName("deleteKey")
         # Connect button to handler
-        if key_text == 'âŒ«':
+        if key_text == KeyboardLayout.BACKSPACE_KEY:
             button.clicked.connect(self.backspace_pressed.emit)
-        elif key_text == 'â†µ':
+        elif key_text == KeyboardLayout.ENTER_KEY:
             button.clicked.connect(self.enter_pressed.emit)
-        elif key_text == 'â‡§':
+        elif key_text == KeyboardLayout.SHIFT_KEY:
             button.clicked.connect(self.toggle_shift)
         elif key_text == '123':
             button.clicked.connect(lambda: self.switch_layout("numbers"))
@@ -202,7 +217,7 @@ class VirtualKeyboard(QWidget, LoggableMixin):
             button.clicked.connect(lambda: self.switch_layout("letters"))
         elif key_text == '#+=':
             button.clicked.connect(lambda: self.switch_layout("symbols"))
-        elif key_text == 'ðŸŒ':
+        elif key_text == KeyboardLayout.LANGUAGE_KEY:
             button.clicked.connect(self.show_language_options)
         else:
             button.clicked.connect(lambda checked, k=key_value: self.key_pressed.emit(k))

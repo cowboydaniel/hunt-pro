@@ -4,12 +4,12 @@ This module provides a light-weight collaboration layer that allows Hunt Pro
 operators to share an active hunting session with teammates. The implementation
 focuses on three guarantees that the roadmap calls out:
 
-* **Secure participation** – Sessions issue time-bound join tokens that are
+* **Secure participation** - Sessions issue time-bound join tokens that are
   validated using an HMAC signature so that only invited operators can
   contribute updates.
-* **Real-time locations** – Each teammate can push periodic location updates
+* **Real-time locations** - Each teammate can push periodic location updates
   which are tracked with their last seen timestamp and optional status text.
-* **Event annotations** – Hunters can drop annotated events that optionally
+* **Event annotations** - Hunters can drop annotated events that optionally
   include geospatial context for later review or export.
 
 The module intentionally avoids networking concerns; it only models the data

@@ -256,7 +256,7 @@ class SensorDiagnosticsModule(BaseModule):
         for index in range(self.calibration_steps_list.count()):
             item = self.calibration_steps_list.item(index)
             if item.text() == current_step:
-                item.setText(f"✅ {current_step}")
+                item.setText(f"[Done] {current_step}")
                 break
         if not self._calibration_queue:
             self._finish_calibration()
