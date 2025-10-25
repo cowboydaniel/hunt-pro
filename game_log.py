@@ -12,21 +12,116 @@ from typing import List, Dict, Optional, Any, Union, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum, auto
 import uuid
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
-    QTabWidget, QPushButton, QLabel, QLineEdit, QTextEdit, QSpinBox,
-    QDoubleSpinBox, QComboBox, QCheckBox, QDateEdit, QTimeEdit,
-    QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
-    QScrollArea, QProgressBar, QMessageBox, QFileDialog,
-    QFrame, QSplitter, QTreeWidget, QTreeWidgetItem
-)
-from PySide6.QtCore import (
-    Qt, Signal, QTimer, QThread, QDate, QTime, QDateTime,
-    QSettings, QAbstractTableModel, QModelIndex
-)
-from PySide6.QtGui import QFont, QColor, QPixmap, QPainter
-from PySide6.QtCharts import QChart, QChartView, QPieSeries, QBarSeries, QBarSet
-from main import BaseModule
+try:  # pragma: no cover - optional Qt dependency
+    from PySide6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
+        QTabWidget, QPushButton, QLabel, QLineEdit, QTextEdit, QSpinBox,
+        QDoubleSpinBox, QComboBox, QCheckBox, QDateEdit, QTimeEdit,
+        QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
+        QScrollArea, QProgressBar, QMessageBox, QFileDialog,
+        QFrame, QSplitter, QTreeWidget, QTreeWidgetItem
+    )
+    from PySide6.QtCore import (
+        Qt, Signal, QTimer, QThread, QDate, QTime, QDateTime,
+        QSettings, QAbstractTableModel, QModelIndex
+    )
+    from PySide6.QtGui import QFont, QColor, QPixmap, QPainter
+    from main import BaseModule
+    _QT_AVAILABLE = True
+except ImportError:  # pragma: no cover - executed when Qt bindings unavailable
+    class _QtStub:
+        def __init__(self, *_, **__):
+            pass
+
+        def __call__(self, *_, **__):
+            return _QtStub()
+
+        def __getattr__(self, _):
+            return _QtStub()
+
+        def __bool__(self):
+            return False
+
+    class _SignalStub:
+        def connect(self, *_, **__):
+            pass
+
+        def emit(self, *_, **__):
+            pass
+
+    def Signal(*_, **__):  # type: ignore[override]
+        return _SignalStub()
+
+    class _TimerStub(_QtStub):
+        def __init__(self, *_, **__):
+            super().__init__()
+            self.timeout = _SignalStub()
+
+        def setInterval(self, *_, **__):
+            pass
+
+        def start(self, *_, **__):
+            pass
+
+        def stop(self, *_, **__):
+            pass
+
+    class _ThreadStub(_QtStub):
+        def start(self, *_, **__):
+            pass
+
+        def quit(self, *_, **__):
+            pass
+
+        def wait(self, *_, **__):
+            pass
+
+    class _SettingsStub(dict):
+        def value(self, key, default=None, type=None):  # type: ignore[override]
+            return super().get(key, default)
+
+        def setValue(self, key, value):  # type: ignore[override]
+            self[key] = value
+
+    class _QtNamespace:
+        AlignRight = 0
+        AlignCenter = 0
+        AlignBottom = 0
+        Horizontal = 1
+        UserRole = 32
+        ScrollBarAsNeeded = 0
+
+    QWidget = QVBoxLayout = QHBoxLayout = QFormLayout = QGridLayout = _QtStub
+    QTabWidget = QPushButton = QLabel = QLineEdit = QTextEdit = QSpinBox = _QtStub
+    QDoubleSpinBox = QComboBox = QCheckBox = QDateEdit = QTimeEdit = _QtStub
+    QTableWidget = QTableWidgetItem = QHeaderView = QGroupBox = _QtStub
+    QScrollArea = QProgressBar = QMessageBox = QFileDialog = _QtStub
+    QFrame = QSplitter = QTreeWidget = QTreeWidgetItem = _QtStub
+    QTimer = _TimerStub
+    QThread = _ThreadStub
+    QDate = QTime = QDateTime = _QtStub
+    QSettings = _SettingsStub
+    QAbstractTableModel = QModelIndex = _QtStub
+    Qt = _QtNamespace()
+    QFont = QColor = QPixmap = QPainter = _QtStub
+
+    class _BaseModuleStub:
+        def __init__(self, *_, **__):
+            pass
+
+    BaseModule = _BaseModuleStub  # type: ignore[assignment]
+    _QT_AVAILABLE = False
+
+if _QT_AVAILABLE:
+    try:
+        from PySide6.QtCharts import QChart, QChartView, QPieSeries, QBarSeries, QBarSet
+        _GAMELOG_QT_CHARTS_AVAILABLE = True
+    except ImportError:  # pragma: no cover - charts optional at runtime
+        QChart = QChartView = QPieSeries = QBarSeries = QBarSet = None  # type: ignore
+        _GAMELOG_QT_CHARTS_AVAILABLE = False
+else:
+    QChart = QChartView = QPieSeries = QBarSeries = QBarSet = None  # type: ignore
+    _GAMELOG_QT_CHARTS_AVAILABLE = False
 from logger import get_logger, LoggableMixin
 from migrations import migrate_game_log_store, MigrationError
 GAME_LOG_SCHEMA_VERSION = 1
@@ -631,7 +726,7 @@ class ExportThread(QThread):
         # Header
         html += f"""
     <div class="header">
-        <h1>ðŸ¹ Hunt Pro - Game Log Report</h1>
+        <h1>Hunt Pro - Game Log Report</h1>
         <p>Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
     </div>
 """
@@ -718,10 +813,10 @@ class GameLogModule(BaseModule):
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget)
         # Create tabs
-        self.tab_widget.addTab(self._create_entry_tab(), "ðŸ“ New Entry")
-        self.tab_widget.addTab(self._create_history_tab(), "ðŸ“‹ History")
-        self.tab_widget.addTab(self._create_statistics_tab(), "ðŸ“Š Statistics")
-        self.tab_widget.addTab(self._create_export_tab(), "ðŸ’¾ Export")
+        self.tab_widget.addTab(self._create_entry_tab(), "New Entry")
+        self.tab_widget.addTab(self._create_history_tab(), "History")
+        self.tab_widget.addTab(self._create_statistics_tab(), "Statistics")
+        self.tab_widget.addTab(self._create_export_tab(), "Export")
         # Apply styling
         self.apply_styling()
     def _create_entry_tab(self) -> QWidget:
@@ -738,7 +833,7 @@ class GameLogModule(BaseModule):
         form_layout = QVBoxLayout(form_widget)
         form_layout.setSpacing(20)
         # Basic information group
-        basic_group = QGroupBox("ðŸ“‹ Basic Information")
+        basic_group = QGroupBox("Basic Information")
         basic_layout = QFormLayout()
         self.entry_type_combo = QComboBox()
         self.entry_type_combo.setMinimumHeight(50)
@@ -766,7 +861,7 @@ class GameLogModule(BaseModule):
         basic_group.setLayout(basic_layout)
         form_layout.addWidget(basic_group)
         # Location group
-        location_group = QGroupBox("ðŸ“ Location")
+        location_group = QGroupBox("Location")
         location_layout = QFormLayout()
         self.location_name_edit = QLineEdit()
         self.location_name_edit.setPlaceholderText("e.g., 'North Stand', 'Oak Ridge'")
@@ -794,7 +889,7 @@ class GameLogModule(BaseModule):
         location_group.setLayout(location_layout)
         form_layout.addWidget(location_group)
         # Weather group
-        weather_group = QGroupBox("ðŸŒ¤ï¸ Weather Conditions")
+        weather_group = QGroupBox("Weather Conditions")
         weather_layout = QFormLayout()
         self.weather_condition_combo = QComboBox()
         self.weather_condition_combo.setMinimumHeight(50)
@@ -804,7 +899,7 @@ class GameLogModule(BaseModule):
         self.temperature_spin = QSpinBox()
         self.temperature_spin.setRange(-40, 50)
         self.temperature_spin.setValue(20)
-        self.temperature_spin.setSuffix("Â°C")
+        self.temperature_spin.setSuffix(" degC")
         self.temperature_spin.setMinimumHeight(50)
         weather_layout.addRow("Temperature:", self.temperature_spin)
         self.wind_speed_spin = QSpinBox()
@@ -820,7 +915,7 @@ class GameLogModule(BaseModule):
         weather_group.setLayout(weather_layout)
         form_layout.addWidget(weather_group)
         # Harvest details group (initially hidden)
-        self.harvest_group = QGroupBox("ðŸŽ¯ Harvest Details")
+        self.harvest_group = QGroupBox("Harvest Details")
         harvest_layout = QFormLayout()
         self.weight_spin = QDoubleSpinBox()
         self.weight_spin.setRange(0, 1000)
@@ -851,7 +946,7 @@ class GameLogModule(BaseModule):
         self.harvest_group.setLayout(harvest_layout)
         form_layout.addWidget(self.harvest_group)
         # Notes group
-        notes_group = QGroupBox("ðŸ“ Notes")
+        notes_group = QGroupBox("Notes")
         notes_layout = QVBoxLayout()
         self.notes_edit = QTextEdit()
         self.notes_edit.setMinimumHeight(120)
@@ -863,13 +958,13 @@ class GameLogModule(BaseModule):
         form_buttons_layout = QHBoxLayout()
         form_buttons_layout.setSpacing(15)
         # Save Entry button
-        self.save_entry_btn = QPushButton("ðŸ’¾ Save Entry")
+        self.save_entry_btn = QPushButton("Save Entry")
         self.save_entry_btn.setObjectName("primary")
         self.save_entry_btn.setMinimumHeight(60)
         self.save_entry_btn.clicked.connect(self.save_entry)
         form_buttons_layout.addWidget(self.save_entry_btn)
         # Clear Form button
-        self.clear_form_btn = QPushButton("ðŸ—‘ï¸ Clear Form")
+        self.clear_form_btn = QPushButton("Clear Form")
         self.clear_form_btn.setObjectName("secondary")
         self.clear_form_btn.setMinimumHeight(60)
         self.clear_form_btn.clicked.connect(self.clear_form)
@@ -907,7 +1002,7 @@ class GameLogModule(BaseModule):
         filter_layout.addWidget(self.filter_type_combo)
         filter_layout.addStretch()
         # Delete selected button
-        self.delete_selected_btn = QPushButton("ðŸ—‘ï¸ Delete Selected")
+        self.delete_selected_btn = QPushButton("Delete Selected")
         self.delete_selected_btn.setObjectName("danger")
         self.delete_selected_btn.clicked.connect(self.delete_selected_entries)
         filter_layout.addWidget(self.delete_selected_btn)
@@ -940,13 +1035,33 @@ class GameLogModule(BaseModule):
         # Charts area
         charts_splitter = QSplitter(Qt.Horizontal)
         # Species chart
-        self.species_chart_view = QChartView()
-        self.species_chart_view.setMinimumHeight(300)
-        charts_splitter.addWidget(self.species_chart_view)
+        if _GAMELOG_QT_CHARTS_AVAILABLE and QChartView is not None:
+            self.species_chart_view = QChartView()
+            self.species_chart_view.setMinimumHeight(300)
+            charts_splitter.addWidget(self.species_chart_view)
+        else:
+            self.species_chart_view = None
+            species_placeholder = QLabel(
+                "QtCharts is not available. Species distribution visualisation is disabled."
+            )
+            species_placeholder.setWordWrap(True)
+            species_placeholder.setAlignment(Qt.AlignCenter)
+            species_placeholder.setMinimumHeight(200)
+            charts_splitter.addWidget(species_placeholder)
         # Monthly activity chart
-        self.activity_chart_view = QChartView()
-        self.activity_chart_view.setMinimumHeight(300)
-        charts_splitter.addWidget(self.activity_chart_view)
+        if _GAMELOG_QT_CHARTS_AVAILABLE and QChartView is not None:
+            self.activity_chart_view = QChartView()
+            self.activity_chart_view.setMinimumHeight(300)
+            charts_splitter.addWidget(self.activity_chart_view)
+        else:
+            self.activity_chart_view = None
+            activity_placeholder = QLabel(
+                "QtCharts is not available. Activity trends visualisation is disabled."
+            )
+            activity_placeholder.setWordWrap(True)
+            activity_placeholder.setAlignment(Qt.AlignCenter)
+            activity_placeholder.setMinimumHeight(200)
+            charts_splitter.addWidget(activity_placeholder)
         layout.addWidget(charts_splitter)
         return tab
     def _create_export_tab(self) -> QWidget:
@@ -954,7 +1069,7 @@ class GameLogModule(BaseModule):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         # Export options
-        export_group = QGroupBox("ðŸ’¾ Export Options")
+        export_group = QGroupBox("Export Options")
         export_layout = QFormLayout()
         self.export_format_combo = QComboBox()
         self.export_format_combo.addItems(["JSON", "CSV", "KML", "HTML"])
@@ -982,7 +1097,7 @@ class GameLogModule(BaseModule):
         export_group.setLayout(export_layout)
         layout.addWidget(export_group)
         # Export button
-        self.export_btn = QPushButton("ðŸ’¾ Export Data")
+        self.export_btn = QPushButton("Export Data")
         self.export_btn.setObjectName("primary")
         self.export_btn.setMinimumHeight(60)
         self.export_btn.clicked.connect(self.export_data)
@@ -1001,19 +1116,19 @@ class GameLogModule(BaseModule):
         cards_frame = QFrame()
         cards_layout = QHBoxLayout(cards_frame)
         # Total entries card
-        total_card = self.create_stat_card("Total Entries", str(len(self.entries)), "ðŸ“Š")
+        total_card = self.create_stat_card("Total Entries", str(len(self.entries)), "DATA")
         cards_layout.addWidget(total_card)
         # Harvests card
         harvests = [e for e in self.entries if e.entry_type == EntryType.HARVEST]
-        harvest_card = self.create_stat_card("Harvests", str(len(harvests)), "ðŸŽ¯")
+        harvest_card = self.create_stat_card("Harvests", str(len(harvests)), "HARV")
         cards_layout.addWidget(harvest_card)
         # Sightings card
         sightings = [e for e in self.entries if e.entry_type == EntryType.SIGHTING]
-        sighting_card = self.create_stat_card("Sightings", str(len(sightings)), "ðŸ‘ï¸")
+        sighting_card = self.create_stat_card("Sightings", str(len(sightings)), "SIGHT")
         cards_layout.addWidget(sighting_card)
         # Species count card
         species_count = len(set(e.species for e in self.entries))
-        species_card = self.create_stat_card("Species", str(species_count), "ðŸ¦Œ")
+        species_card = self.create_stat_card("Species", str(species_count), "SPEC")
         cards_layout.addWidget(species_card)
         layout.addWidget(cards_frame)
     def create_stat_card(self, title: str, value: str, icon: str) -> QFrame:
@@ -1228,7 +1343,7 @@ class GameLogModule(BaseModule):
                 QTableWidgetItem(entry.species.value),
                 QTableWidgetItem(str(entry.count)),
                 QTableWidgetItem(entry.location.name),
-                QTableWidgetItem(f"{entry.weather.condition.value}, {entry.weather.temperature}Â°C"),
+                QTableWidgetItem(f"{entry.weather.condition.value}, {entry.weather.temperature} degC"),
                 QTableWidgetItem(entry.notes[:100] + "..." if len(entry.notes) > 100 else entry.notes)
             ]
             for col, item in enumerate(items):
@@ -1290,6 +1405,8 @@ class GameLogModule(BaseModule):
         self.update_activity_chart()
     def update_species_chart(self):
         """Update the species distribution pie chart."""
+        if not _GAMELOG_QT_CHARTS_AVAILABLE or self.species_chart_view is None or QPieSeries is None:
+            return
         try:
             # Count entries by species
             species_counts = {}
@@ -1312,6 +1429,8 @@ class GameLogModule(BaseModule):
             self.log_error("Failed to update species chart", exception=e)
     def update_activity_chart(self):
         """Update the monthly activity bar chart."""
+        if not _GAMELOG_QT_CHARTS_AVAILABLE or self.activity_chart_view is None or QBarSeries is None:
+            return
         try:
             # Count entries by month
             monthly_counts = {}
@@ -1388,7 +1507,7 @@ class GameLogModule(BaseModule):
         """Handle export completion."""
         self.export_btn.setEnabled(True)
         self.export_progress.setVisible(False)
-        self.export_status_label.setText(f"âœ… Export completed: {Path(file_path).name}")
+        self.export_status_label.setText(f"Export completed: {Path(file_path).name}")
         self.status_message.emit(f"Data exported to {Path(file_path).name}")
         if self.export_thread:
             self.export_thread.quit()
@@ -1399,7 +1518,7 @@ class GameLogModule(BaseModule):
         """Handle export error."""
         self.export_btn.setEnabled(True)
         self.export_progress.setVisible(False)
-        self.export_status_label.setText("âŒ Export failed")
+        self.export_status_label.setText("Export failed")
         self.error_occurred.emit("Export Error", error_message)
         if self.export_thread:
             self.export_thread.quit()
@@ -1618,7 +1737,7 @@ def format_coordinates(latitude: Optional[float], longitude: Optional[float]) ->
         return "No GPS data"
     lat_dir = "N" if latitude >= 0 else "S"
     lon_dir = "E" if longitude >= 0 else "W"
-    return f"{abs(latitude):.6f}Â°{lat_dir}, {abs(longitude):.6f}Â°{lon_dir}"
+    return f"{abs(latitude):.6f} deg{lat_dir}, {abs(longitude):.6f} deg{lon_dir}"
 def calculate_distance_between_entries(entry1: GameEntry, entry2: GameEntry) -> Optional[float]:
     """Calculate distance in kilometers between two entries with GPS coordinates."""
     if (entry1.location.latitude is None or entry1.location.longitude is None or

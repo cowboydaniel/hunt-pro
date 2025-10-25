@@ -611,44 +611,44 @@ class ModuleManager(QObject):
         self.available_modules = {
             'sensor_diagnostics': {
                 'path': 'sensor_diagnostics_module.SensorDiagnosticsModule',
-                'display_name': '🛰️ Sensors',
+                'display_name': 'Sensors',
                 'description': 'Real-time diagnostics and calibration workflows for paired devices',
-                'icon': '🛰️',
+                'icon': 'SENS',
                 'priority': 0
             },
             'ballistics': {
                 'path': 'ballistics.BallisticsModule',
-                'display_name': 'ðŸŽ¯ Ballistics',
+                'display_name': 'Ballistics',
                 'description': 'Advanced ballistics calculator with environmental corrections',
-                'icon': 'ðŸŽ¯',
+                'icon': 'BALL',
                 'priority': 1
             },
             'nav_map': {
                 'path': 'nav_map.NavigationModule', 
-                'display_name': 'ðŸ—ºï¸ Navigation',
+                'display_name': 'Navigation',
                 'description': 'GPS navigation and mapping tools',
-                'icon': 'ðŸ—ºï¸',
+                'icon': 'NAV',
                 'priority': 2
             },
             'game_log': {
                 'path': 'game_log.GameLogModule',
-                'display_name': 'ðŸ“Š Game Log',
+                'display_name': 'Game Log',
                 'description': 'Track hunting activities and harvests',
-                'icon': 'ðŸ“Š',
+                'icon': 'LOG',
                 'priority': 3
             },
             'field_tools': {
                 'path': 'field_tools.FieldToolsModule',
-                'display_name': 'ðŸ› ï¸ Field Tools',
+                'display_name': 'Field Tools',
                 'description': 'Environmental calculations and first aid',
-                'icon': 'ðŸ› ï¸',
+                'icon': 'FIELD',
                 'priority': 4
             },
             'advanced_tools': {
                 'path': 'advanced_tools.AdvancedToolsModule',
-                'display_name': 'ðŸ›¡ï¸ Advanced Tools',
+                'display_name': 'Advanced Tools',
                 'description': 'RF blocking, night vision, and thermal imaging',
-                'icon': 'ðŸ›¡ï¸',
+                'icon': 'ADV',
                 'priority': 5
             }
         }
@@ -750,7 +750,7 @@ class LoadingScreen(QSplashScreen):
         # Draw title
         painter.setPen(QColor("white"))
         painter.setFont(QFont("Arial", 24, QFont.Bold))
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, "ðŸ¹ Hunt Pro\nProfessional Hunting Assistant")
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, "Hunt Pro\nProfessional Hunting Assistant")
         painter.end()
         self.setPixmap(pixmap)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
@@ -807,18 +807,18 @@ class MainWindow(QMainWindow):
         header.setObjectName("header")
         header_layout = QHBoxLayout(header)
         # Title
-        title_label = QLabel("ðŸ¹ Hunt Pro")
+        title_label = QLabel("Hunt Pro")
         title_label.setFont(QFont("Arial", 20, QFont.Bold))
         title_label.setObjectName("title")
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         # Settings button
-        settings_btn = QPushButton("âš™ï¸ Settings")
+        settings_btn = QPushButton("Settings")
         settings_btn.setObjectName("header_button")
         settings_btn.clicked.connect(self.show_settings)
         header_layout.addWidget(settings_btn)
         # About button
-        about_btn = QPushButton("â„¹ï¸ About")
+        about_btn = QPushButton("About")
         about_btn.setObjectName("header_button")
         about_btn.clicked.connect(self.show_about)
         header_layout.addWidget(about_btn)
@@ -918,7 +918,7 @@ class MainWindow(QMainWindow):
         module_info = self.module_manager.get_module_info(module_name)
         if module_info:
             display_name = module_info['display_name']
-            icon = module_info.get('icon', 'ðŸ“¦')
+            icon = module_info.get('icon', 'TAB')
             self.tab_widget.addTab(module_instance, f"{icon} {display_name}")
             self.logger.info(f"Added tab for module: {module_name}")
     def _on_module_failed(self, module_name: str, error_message: str):
@@ -945,16 +945,16 @@ class MainWindow(QMainWindow):
     def show_about(self):
         """Show about dialog."""
         about_text = """
-        <h2>ðŸ¹ Hunt Pro</h2>
+        <h2>Hunt Pro</h2>
         <p><b>Professional Hunting Assistant</b></p>
         <p>Version 2.0.0 - Touch-Optimized Field Edition</p>
         <p>Hunt Pro is a comprehensive hunting companion application featuring:</p>
         <ul>
-        <li>ðŸŽ¯ Advanced ballistics calculations</li>
-        <li>ðŸ—ºï¸ GPS navigation and mapping</li>
-        <li>ðŸ“Š Game logging and tracking</li>
-        <li>ðŸ› ï¸ Environmental field tools</li>
-        <li>ðŸ›¡ï¸ Advanced tactical equipment</li>
+        <li>Advanced ballistics calculations</li>
+        <li>GPS navigation and mapping</li>
+        <li>Game logging and tracking</li>
+        <li>Environmental field tools</li>
+        <li>Advanced tactical equipment</li>
         </ul>
         <p>Designed for professional hunters and outdoor enthusiasts.</p>
         """
@@ -993,7 +993,7 @@ def main():
     setup_logger("huntpro")
     logger = get_logger()
     logger.info("="*60)
-    logger.info("ðŸ¹ Hunt Pro - Professional Hunting Assistant")
+    logger.info("Hunt Pro - Professional Hunting Assistant")
     logger.info("   Version 2.0.0 - Touch-Optimized Field Edition")
     logger.info("="*60)
     # Create application
