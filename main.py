@@ -144,8 +144,15 @@ class BaseModule(QWidget):
         # Setup base UI properties
         self.setMinimumSize(800, 600)
         self.setAttribute(Qt.WA_AcceptTouchEvents, True)
-        # Initialize error handling
-        self.error_occurred.connect(self._get_error_handler())
+        # Initialize error handling. Older modules may be instantiated before
+        # the helper is injected, so fall back to the default handler when the
+        # accessor is unavailable.
+        if hasattr(self, "_get_error_handler"):
+            handler = self._get_error_handler()
+        else:  # pragma: no cover - defensive guard for legacy modules
+            handler = self._default_handle_error
+            setattr(self, "_handle_error", handler)
+        self.error_occurred.connect(handler)
     def initialize(self) -> bool:
         """Initialize the module. Override in subclasses."""
         try:
