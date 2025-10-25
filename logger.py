@@ -345,28 +345,54 @@ class LoggableMixin:
     def __init__(self):
         self._logger = get_logger()
         self._module_name = self.__class__.__name__
-    def log_trace(self, message: str, **kwargs):
+    def log_trace(self, message: str, *args, **kwargs):
         """Log trace message."""
-        self._logger.trace(f"[{self._module_name}] {message}", **kwargs)
-    def log_debug(self, message: str, **kwargs):
+        self._logger.trace(f"[{self._module_name}] {message}", *args, **kwargs)
+    def log_debug(self, message: str, *args, **kwargs):
         """Log debug message."""
-        self._logger.debug(f"[{self._module_name}] {message}", **kwargs)
-    def log_info(self, message: str, **kwargs):
+        self._logger.debug(f"[{self._module_name}] {message}", *args, **kwargs)
+    def log_info(self, message: str, *args, **kwargs):
         """Log info message."""
-        self._logger.info(f"[{self._module_name}] {message}", **kwargs)
-    def log_warning(self, message: str, **kwargs):
+        self._logger.info(f"[{self._module_name}] {message}", *args, **kwargs)
+    def log_warning(self, message: str, *args, **kwargs):
         """Log warning message."""
-        self._logger.warning(f"[{self._module_name}] {message}", **kwargs)
-    def log_error(self, message: str, exception: Optional[Exception] = None, **kwargs):
+        self._logger.warning(f"[{self._module_name}] {message}", *args, **kwargs)
+    def log_error(
+        self,
+        message: str,
+        *args,
+        exception: Optional[Exception] = None,
+        **kwargs,
+    ):
         """Log error message."""
-        self._logger.error(f"[{self._module_name}] {message}", exception=exception, **kwargs)
-    def log_critical(self, message: str, exception: Optional[Exception] = None, **kwargs):
+        self._logger.error(
+            f"[{self._module_name}] {message}",
+            *args,
+            exception=exception,
+            **kwargs,
+        )
+    def log_critical(
+        self,
+        message: str,
+        *args,
+        exception: Optional[Exception] = None,
+        **kwargs,
+    ):
         """Log critical message."""
-        self._logger.critical(f"[{self._module_name}] {message}", exception=exception, **kwargs)
-    def log_field_event(self, message: str, **kwargs):
+        self._logger.critical(
+            f"[{self._module_name}] {message}",
+            *args,
+            exception=exception,
+            **kwargs,
+        )
+    def log_field_event(self, message: str, *args, **kwargs):
         """Log field event."""
-        self._logger.field_event(f"[{self._module_name}] {message}", **kwargs)
-    def log_user_action(self, action: str, details: Optional[Dict[str, Any]] = None):
+        self._logger.field_event(f"[{self._module_name}] {message}", *args, **kwargs)
+    def log_user_action(
+        self,
+        action: str,
+        details: Optional[Dict[str, Any]] = None,
+    ):
         """Log user action."""
         action_details = {'module': self._module_name}
         if details:
