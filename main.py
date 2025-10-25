@@ -26,7 +26,7 @@ from PySide6.QtGui import (
     QPainter, QLinearGradient
 )
 # Import our modules
-from logger import get_logger, setup_logger
+from logger import get_logger, setup_logger, LoggableMixin
 from keyboard import VirtualKeyboardManager
 from numpad import VirtualNumpadManager
 from config_validation import validate_configuration, ValidationIssue
@@ -123,7 +123,7 @@ PROFILE_PRESETS = [
 ]
 
 PROFILE_PRESET_MAP = {preset["key"]: preset for preset in PROFILE_PRESETS}
-class BaseModule(QWidget):
+class BaseModule(QWidget, LoggableMixin):
     """Base class for all Hunt Pro modules."""
     # Enhanced signals
     status_message = Signal(str)
@@ -134,9 +134,13 @@ class BaseModule(QWidget):
     module_ready = Signal()
     def __init__(self, parent=None):
         super().__init__(parent)
+        LoggableMixin.__init__(self)
         self.module_name = self.__class__.__name__.replace('Module', '')
         self.settings = QSettings("HuntPro", f"module_{self.module_name}")
-        self.logger = get_logger()
+        # Maintain backwards compatibility with modules using the legacy
+        # ``self.logger`` attribute while also exposing the rich logging
+        # helpers provided by :class:`LoggableMixin`.
+        self.logger = self._logger
         # Module state
         self._initialized = False
         self._error_count = 0
